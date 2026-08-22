@@ -11,12 +11,14 @@ from __future__ import annotations
 
 from services.report.layout import e, page
 
+# 화면 흐름과 같은 순서·같은 말을 쓴다. 여기만 옛 이름으로 남으면
+# 「분석·대조」가 무엇인지 화면 어디서도 찾을 수 없다.
 STEPS = [
     ("1", "접수", "심사번호·목표 종목·보유 자격을 적습니다", "/submissions/new"),
     ("2", "서류", "지원자가 낸 서류를 올립니다. 식별정보는 자동으로 가려집니다", None),
-    ("3", "분석", "서류를 능력단위요소에 배치하고 근거를 뽑습니다", None),
-    ("4", "대조", "인용이 원문에 실제로 있는지 기계가 확인합니다", None),
-    ("5", "검토", "요소마다 인정 여부를 정하십니다", None),
+    ("3", "시간 대조", "이수 기록으로 확인되는 시간을 자동으로 맞대 봅니다", None),
+    ("4", "근거 분석", "남은 시간을 제출 자료로 따져 보고 보고서를 만듭니다", None),
+    ("5", "검토", "보고서를 읽으신 뒤 항목마다 인정 여부를 정하십니다", None),
     ("6", "판정", "감면 시간과 함께 최종 판정을 기록합니다", None),
 ]
 
@@ -64,7 +66,7 @@ def render_home(todo: dict, recent: list[dict], total: int,
     items = ""
     for label, n, href in (
         ("서류를 올려야 하는 건", todo.get("서류", 0), "/cases#서류-대기"),
-        ("판정을 시작할 건", todo.get("판정", 0), "/cases#수집-완료"),
+        ("근거 분석을 시작할 건", todo.get("분석", 0), "/cases#분석-대기"),
         ("검토를 기다리는 건", todo.get("검토", 0), "/cases#검토-대기"),
         ("확인이 필요한 건", todo.get("확인", 0), "/cases#확인-필요"),
     ):
@@ -80,7 +82,7 @@ def render_home(todo: dict, recent: list[dict], total: int,
                    for n, t, d, href in STEPS)
 
     rows = "".join(f"""<tr>
- <td><a href="/audit/{e(r['case_number'])}"><b>{e(r['case_number'])}</b></a></td>
+ <td><a href="/submissions/{r['id']}"><b>{e(r['case_number'])}</b></a></td>
  <td>{e(r['official_name'] or r['target_program_id'])}</td>
  <td><span class="st">{e(r['step'])}</span></td>
  <td class="n" style="color:var(--tm);font-size:11.5px">{r['received_at']:%m-%d %H:%M}</td>

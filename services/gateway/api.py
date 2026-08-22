@@ -440,10 +440,10 @@ def _next_case(s: Session) -> str:
     return f"{pre}{(last or 0) + 1:04d}"
 
 
-TODO_OF = {"received": "서류", "ingested": "판정", "failed": "판정",
+TODO_OF = {"received": "서류", "ingested": "분석", "failed": "분석",
            "assessed": "검토", "needs_review": "확인"}
-STEP_KO = {"received": "서류 대기", "ingested": "수집 완료", "queued": "판정 대기",
-           "assessing": "판정 중", "assessed": "검토 대기",
+STEP_KO = {"received": "서류 대기", "ingested": "분석 대기", "queued": "분석 대기",
+           "assessing": "분석 중", "assessed": "검토 대기",
            "needs_review": "확인 필요", "decided": "완료", "failed": "실패"}
 
 
@@ -458,8 +458,8 @@ def home(s: Session = Depends(get_session)):
             todo[k] = todo.get(k, 0) + n
     recent = [dict(r) | {"step": STEP_KO.get(r["status"], r["status"])}
               for r in s.execute(text("""
-        SELECT sub.case_number, sub.target_program_id, sub.status, sub.received_at,
-               p.official_name
+        SELECT sub.id, sub.case_number, sub.target_program_id, sub.status,
+               sub.received_at, p.official_name
         FROM submission sub LEFT JOIN catalog_wsd_program p
              ON p.program_id = sub.target_program_id
         ORDER BY sub.received_at DESC LIMIT 5""")).mappings()]

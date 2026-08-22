@@ -39,7 +39,9 @@ CSS = """*{box-sizing:border-box}
  --s3:#2b2b29;--bd:#3a3a38;--tp:#fff;--ts:#c3c2b7;--tm:#8f8e86}}
 body{margin:0;background:var(--s1);color:var(--tp);
  font:14px/1.65 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",Pretendard,sans-serif}
-.wrap{max-width:1080px;margin:0 auto;padding:28px 20px 120px}
+/* 아래 고정 바가 마지막 요소를 덮었다. 바 높이는 화면 폭에 따라 달라지므로
+   (넓으면 한 줄, 좁으면 세 줄) 고정값으로는 맞출 수 없다. 실제 높이를 재서 넣는다. */
+.wrap{max-width:1080px;margin:0 auto;padding:28px 20px calc(var(--barh, 120px) + 28px)}
 h1{font-size:23px;margin:0 0 4px}.sub{color:var(--tm);font-size:12.5px;margin:0 0 18px}
 .banner{background:var(--s2);border:1px solid var(--bd);border-left:3px solid var(--warn);
  border-radius:8px;padding:11px 15px;margin-bottom:16px;font-size:12.8px;color:var(--ts)}
@@ -147,6 +149,10 @@ button.d.on[data-d="보류"]{background:var(--hold)}
 input.m{flex:1;min-width:150px;font:inherit;font-size:12.3px;padding:4px 10px;
  border:1px solid var(--bd);border-radius:7px;background:var(--s1);color:var(--tp)}
 .saved{font-size:11.3px;color:var(--ok);white-space:nowrap}
+.crumbs{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;margin-bottom:12px}
+.means{margin:8px 0;display:grid;gap:4px}
+.means div{font-size:12.5px;line-height:1.55}
+.means b{display:inline-block;min-width:74px;color:var(--tp)}
 .bar{position:fixed;left:0;right:0;bottom:0;background:var(--s2);border-top:1px solid var(--bd);
  padding:11px 20px;z-index:9}
 .bar .in{max-width:1080px;margin:0 auto;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
@@ -389,6 +395,10 @@ def render_review(s: Session, assessment_id: int) -> str:
         f'<div class="lg"><span class="dot" style="background:var(--{REC[k][0]})"></span>'
         f'{k} {REC[k][1]}</div>' for k in ["R0", "R1", "R2", "R3", "R4", "R5"])
 
+    means = "".join(
+        f'<div><b>{e(k)}</b> {e(v)}</div>'
+        for k, v in (rb.final_decision.get("element_decision_meanings") or {}).items())
+
     dec_opts = "".join(f'<option{" selected" if fd and fd["decision"] == d else ""}>{d}</option>'
                        for d in rb.final_decision["decisions"])
     fd_line = (f'기록됨 — {e(fd["decision"])} · {fd["recognized_hours"]}시간 '
@@ -396,18 +406,23 @@ def render_review(s: Session, assessment_id: int) -> str:
 
     from services.report.layout import page_open
     return page_open(f"선행학습인정 검토 — {a['case_number']}", css=CSS, here="/cases") + f"""
-<div style="font-size:12.5px;margin-bottom:12px">
- <a href="/cases">← 접수 현황</a> · <a href="/audit/{e(a['case_number'])}">이 건의 감사 기록</a>
+<div class="crumbs">
+ <a href="/submissions/{a['sid']}">← 심사 개요</a>
+ <a href="/submissions/{a['sid']}/report/time">시간 대조 보고서</a>
+ <a href="/submissions/{a['sid']}/report/evidence">근거 분석 보고서</a>
+ <a href="/audit/{e(a['case_number'])}">감사 기록</a>
 </div>
-<h1>선행학습인정 검토</h1>
+<h1>전문가 검토</h1>
 <p class="sub">심사번호 {e(a['case_number'])} ·
  {e(a['official_name'] or a['target_program_id'])} · 총 필수 {sm.total_hours}시간 ·
  능력단위 {len(sm.units)}개 / 요소 {sm.n_elements}개 ·
  최종판정 <span id="fd">{fd_line}</span></p>
 {banner}
 <div class="note" id="guide">
- <b>다 읽으실 필요는 없습니다.</b> 손이 가는 정도로 묶어 두었습니다 —
- <b>먼저 보실 것</b>부터 보시고, <b>기록으로 확정된 것</b>은 묶음째 인정하시면 됩니다.
+ <b>무엇을 정하시는가</b> — 요소 하나하나에 대해 아래 넷 중 하나를 고르십시오.
+ <div class="means">{means}</div>
+ 근거 분석 보고서를 먼저 읽고 오시면 어디가 쟁점인지 아신 채로 판단하실 수 있습니다.
+ <b>다 읽으실 필요는 없습니다</b> — 손이 가는 정도로 묶어 두었습니다.
  요소 줄을 누르면 근거가, 인용문 옆 「원문」을 누르면 제출 자료의 해당 대목이 펼쳐집니다.
  <br><b>이 화면은 판정이 아니라 판정의 근거입니다.</b> 인정 여부는 보시는 분이 정하십니다.
 </div>
@@ -455,6 +470,13 @@ def render_review(s: Session, assessment_id: int) -> str:
 
 <script>
 const AID = {assessment_id}, SID = {a['sid']};
+
+// 고정 바가 마지막 요소를 덮지 않게 한다. 창 크기가 바뀌면 바도 높이가 바뀐다.
+const fitBar = () => document.documentElement.style.setProperty(
+  '--barh', document.querySelector('.bar').offsetHeight + 'px');
+fitBar();
+addEventListener('resize', fitBar);
+new ResizeObserver(fitBar).observe(document.querySelector('.bar'));
 const $ = id => document.getElementById(id);      // id 에 하이픈이 있으면 전역 변수가 생기지 않는다
 
 function og(b){{
