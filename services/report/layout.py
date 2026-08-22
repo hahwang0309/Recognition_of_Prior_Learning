@@ -91,7 +91,19 @@ button.sm{font-size:12px;padding:3px 10px}
 .msg.ok{background:rgba(12,163,12,.12);color:var(--ok)}
 .msg.no{background:rgba(208,59,59,.12);color:var(--no)}
 footer{color:var(--tm);font-size:11.5px;border-top:1px solid var(--bd);padding-top:14px;margin-top:28px}
-@media(max-width:680px){.row.two,.row.three{grid-template-columns:1fr}}"""
+@media(max-width:680px){
+ .row.two,.row.three{grid-template-columns:1fr}
+ /* 좁은 화면에서 차림표가 세로로 무너지고 이름표와 겹쳤다.
+    가로로 넘기게 두고, 환경 표시는 접는다. */
+ .top .in{gap:10px;min-height:0;padding:0 14px;flex-wrap:nowrap;align-items:stretch}
+ .top .bx{font-size:12.5px;align-self:center;flex:none}
+ .top nav{gap:14px;overflow-x:auto;flex-wrap:nowrap;
+  scrollbar-width:none;-webkit-overflow-scrolling:touch}
+ .top nav::-webkit-scrollbar{display:none}
+ .top nav a{padding:12px 0;white-space:nowrap;font-size:12.5px}
+ .top .env{display:none}
+ .wrap{padding:20px 14px 80px}
+ h1{font-size:20px}}"""
 
 
 def page_open(title: str, *, css: str = "", here: str = "", env: str = "") -> str:
