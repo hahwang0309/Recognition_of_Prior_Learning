@@ -197,7 +197,7 @@ def render_upload(sub: dict, doc_types: list[dict], grades: list[str],
 <label class="drop" id="drop" for="file">
  파일을 여기에 끌어놓거나 눌러서 고르세요<br>
  <span style="font-size:11.5px">{" · ".join(accept or [])} · 파일당 {max_mb}MB 까지</span>
- <input type="file" id="file" multiple style="display:none"
+ <input type="file" id="file" multiple
         accept="{",".join("." + x for x in (accept or []))}">
 </label>
 <div class="files" id="files"></div>
