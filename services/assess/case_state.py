@@ -57,7 +57,10 @@ class CaseState:
     n_fragments: int
     extra_docs: list[dict]                  # 근거 분석에 쓸 수 있는 자료
     time: Run | None                        # ① 시간 대조
-    evidence: Run | None                    # ② 근거 분석
+    evidence: Run | None                    # ② 근거 분석 — **가장 최근** 실행
+    # 이미 끝난 근거 분석. 새 실행이 도는 중이라도 지난 보고서는 계속 열려야 한다.
+    # 이것을 나누지 않았을 때, 재실행 한 번에 완성된 보고서가 화면에서 사라졌다.
+    evidence_done: Run | None
     n_reviewed: int                         # ③ 전문가 검토 — 판단이 기록된 요소 수
     decision: dict | None                   # ④ 최종 판정
 
@@ -90,7 +93,11 @@ class CaseState:
 
     @property
     def n_elements(self) -> int:
-        return self.evidence.n_elements if self.evidence else 0
+        return self.evidence_done.n_elements if self.evidence_done else 0
+
+    @property
+    def analyzing(self) -> bool:
+        return bool(self.evidence and self.evidence.running)
 
     # ── ③ 검토 ──
     @property
@@ -105,12 +112,12 @@ class CaseState:
             return None
         if self.n_documents == 0:
             return ("서류 올리기", f"/submissions/{self.submission_id}/upload")
-        if self.evidence and self.evidence.running:
+        if self.analyzing:
             return None                                  # 진행 중 — 기다린다
-        if self.evidence and self.evidence.done:
+        if self.evidence_done:
             if not self.review_done:
-                return ("검토하기", f"/assessments/{self.evidence.id}/review")
-            return ("최종 판정 기록", f"/assessments/{self.evidence.id}/review#decide")
+                return ("검토하기", f"/assessments/{self.evidence_done.id}/review")
+            return ("최종 판정 기록", f"/assessments/{self.evidence_done.id}/review#decide")
         if self.can_analyze:
             return ("근거 분석 시작", "analyze")
         return ("최종 판정 기록", f"/submissions/{self.submission_id}#decide")
@@ -127,15 +134,16 @@ def _note(raw: Any) -> dict:
     return {}
 
 
-def _runs(s: Session, submission_id: int) -> dict[str, Run]:
-    """kind 별로 가장 최근 판정 하나씩."""
+def _runs(s: Session, submission_id: int, *, only_done: bool = False) -> dict[str, Run]:
+    """kind 별로 가장 최근 판정 하나씩. only_done 이면 끝난 것 중에서 고른다."""
     out: dict[str, Run] = {}
-    for r in s.execute(text("""
+    where = " AND a.status='done'" if only_done else ""
+    for r in s.execute(text(f"""
         SELECT DISTINCT ON (a.kind)
                a.kind, a.id, a.status, a.model, a.attempts, a.cost_usd,
                a.started_at, a.finished_at, a.overall_note, a.progress,
                (SELECT count(*) FROM assessment_element e WHERE e.assessment_id=a.id) AS n
-        FROM assessment a WHERE a.submission_id=:i
+        FROM assessment a WHERE a.submission_id=:i{where}
         ORDER BY a.kind, a.id DESC"""), {"i": submission_id}).mappings():
         out[r["kind"]] = Run(
             id=r["id"], status=r["status"], model=r["model"], attempts=r["attempts"],
@@ -163,12 +171,13 @@ def case_state(s: Session, submission_id: int) -> CaseState | None:
         {"i": submission_id}).mappings()]
 
     runs = _runs(s, submission_id)
-    ev = runs.get("evidence")
+    done_runs = _runs(s, submission_id, only_done=True)
+    ev, ev_done = runs.get("evidence"), done_runs.get("evidence")
     n_reviewed = 0
-    if ev is not None:
+    if ev_done is not None:
         n_reviewed = s.execute(text(
             "SELECT count(DISTINCT element_id) FROM element_review WHERE assessment_id=:a"),
-            {"a": ev.id}).scalar_one()
+            {"a": ev_done.id}).scalar_one()
 
     dec = s.execute(text("""
         SELECT decision, reason, decided_by, recognized_hours, total_hours, decided_at
@@ -183,7 +192,8 @@ def case_state(s: Session, submission_id: int) -> CaseState | None:
         total_hours=sub["total_hours"] or 0,
         n_documents=len(docs), n_fragments=sum(d["n_frag"] for d in docs),
         extra_docs=[d for d in docs if d["doc_type"] not in TIME_DOC_TYPES],
-        time=runs.get("time"), evidence=ev, n_reviewed=n_reviewed,
+        time=done_runs.get("time") or runs.get("time"),
+        evidence=ev, evidence_done=ev_done, n_reviewed=n_reviewed,
         decision=dict(dec) if dec else None,
     )
 

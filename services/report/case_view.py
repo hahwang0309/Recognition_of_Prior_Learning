@@ -72,7 +72,7 @@ def _bar(st: CaseState) -> str:
     tot = st.total_hours or 1
     yes = st.credited_hours / tot * 100
     maybe = 0.0
-    if st.evidence and st.evidence.done:
+    if st.evidence_done:
         # 근거 분석이 「인정 검토」로 본 시간까지 파랗게 — 아직 확정은 아니다.
         maybe = min(100 - yes, st.open_hours / tot * 100)
     return (f'<div class="bar2"><div class="yes" style="width:{yes:.2f}%"></div>'
@@ -128,30 +128,40 @@ def render_case(s: Session, submission_id: int) -> str | None:
                        f'<a href="/submissions/{sid}/upload">서류 다시 올리기</a>', now=True)
 
     # ── ② 근거 분석 ────────────────────────────────────────────────
-    ev = st.evidence
-    if ev and ev.running:
-        pr = ev.progress or {}
-        done_n, all_n = pr.get("done", 0), pr.get("total", 0) or 1
+    # 「도는 중」과 「이미 나온 보고서」는 따로 본다. 재실행 한 번에 완성된
+    # 보고서가 화면에서 사라지면 안 된다.
+    ev, done = st.evidence, st.evidence_done
+    report_link = (f'<a href="/submissions/{sid}/report/evidence">보고서 보기</a>'
+                   if done else "")
+    if st.analyzing:
+        pr = (ev.progress if ev else None) or {}
+        n_done, n_all = pr.get("done", 0), pr.get("total", 0) or 1
         bar = (f'<div class="prog"><div class="t"><div class="f" '
-               f'style="width:{done_n / all_n * 100:.0f}%"></div></div>'
-               f'<small>{done_n}/{all_n} 능력단위 · '
+               f'style="width:{n_done / n_all * 100:.0f}%"></div></div>'
+               f'<small>{n_done}/{n_all} 능력단위 · '
                f'{e(pr.get("phase") or "분석 중")}</small></div>')
-        steps += _step("②", "근거 분석", _st("진행 중", "ac"),
-                       "제출 자료를 능력단위별로 읽고 있습니다. 6~30분 걸립니다.",
-                       '<a href="">새로 고침</a>', now=True, extra=bar)
-    elif ev and ev.done:
-        cost = f" · 비용 ${ev.cost:.2f}" if ev.cost else ""
+        why = "제출 자료를 능력단위별로 읽고 있습니다. 6~30분 걸립니다."
+        if done:
+            why += " <em>지난 보고서는 그대로 보실 수 있습니다.</em>"
+        steps += _step("②", "근거 분석", _st("진행 중", "ac"), why,
+                       report_link or '<a href="">새로 고침</a>', now=True, extra=bar)
+    elif done:
+        cost = f" · 비용 ${done.cost:.2f}" if done.cost else ""
+        warn = ('<em> 다시 돌린 분석이 실패했습니다 — 아래는 지난 결과입니다.</em>'
+                if ev and ev is not done and not ev.running else "")
         steps += _step("②", "근거 분석", _st("완료", "ok"),
                        f"추가 자료 {len(st.extra_docs)}종에서 "
-                       f"<b>{ev.n_elements}개 항목</b>을 판단했습니다."
-                       f"<em> 호출 {ev.attempts}회{cost}</em>",
-                       f'<a href="/submissions/{sid}/report/evidence">보고서 보기</a>')
+                       f"<b>{done.n_elements}개 항목</b>을 판단했습니다."
+                       f"<em> 호출 {done.attempts}회{cost}</em>{warn}",
+                       report_link)
     elif st.can_analyze:
         kinds = "·".join(sorted({d["doc_type"] for d in st.extra_docs})[:3])
+        failed = ('<em> 지난 분석이 끝나지 못했습니다. 다시 시작하실 수 있습니다.</em>'
+                  if ev else "")
         steps += _step("②", "근거 분석", _st("할 수 있음", "wn"),
                        f"경력·수행을 보여 주는 자료가 <b>{len(st.extra_docs)}건</b> 있습니다"
                        f"({e(kinds)} 등). 시간 대조로 덮이지 않은 "
-                       f"<b>{st.open_hours}시간</b>을 이 자료로 따져 볼 수 있습니다.",
+                       f"<b>{st.open_hours}시간</b>을 이 자료로 따져 볼 수 있습니다.{failed}",
                        f'<form method="post" action="/submissions/{sid}/analyze">'
                        f'<button class="go" type="submit">근거 분석 시작</button></form>',
                        now=True)
@@ -161,18 +171,18 @@ def render_case(s: Session, submission_id: int) -> str | None:
                        off=True)
 
     # ── ③ 전문가 검토 ──────────────────────────────────────────────
-    if ev and ev.done:
-        left = ev.n_elements - st.n_reviewed
+    if done:
+        left = done.n_elements - st.n_reviewed
         if st.review_done:
             steps += _step("③", "전문가 검토", _st("완료", "ok"),
-                           f"{ev.n_elements}개 항목을 모두 판단하셨습니다.",
-                           f'<a href="/assessments/{ev.id}/review">다시 보기</a>')
+                           f"{done.n_elements}개 항목을 모두 판단하셨습니다.",
+                           f'<a href="/assessments/{done.id}/review">다시 보기</a>')
         else:
             steps += _step("③", "전문가 검토",
-                           _st(f"{st.n_reviewed}/{ev.n_elements}", "wn"),
+                           _st(f"{st.n_reviewed}/{done.n_elements}", "wn"),
                            f"보고서를 읽으신 뒤 <b>{left}개 항목</b>에 가·부를 정해 주십시오.",
-                           f'<a class="go" href="/assessments/{ev.id}/review">검토하기</a>',
-                           now=not st.review_done and bool(st.n_reviewed or True))
+                           f'<a class="go" href="/assessments/{done.id}/review">검토하기</a>',
+                           now=True)
     else:
         steps += _step("③", "전문가 검토", _st("대기"),
                        "근거 분석이 끝나면 판단할 항목이 나옵니다.", off=True)
