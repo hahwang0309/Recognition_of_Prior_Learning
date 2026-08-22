@@ -16,14 +16,33 @@ NAV = [("/", "홈"), ("/cases", "접수 현황"), ("/submissions/new", "새 접�
        ("/audit", "감사"), ("/stats", "운영 통계")]
 
 BASE = """*{box-sizing:border-box}
-:root{--s1:#fcfcfb;--s2:#f4f4f1;--s3:#eceae4;--bd:#e0e0da;--tp:#0b0b0b;--ts:#4a4a46;--tm:#84837c;
- --ac:#3f8ed0;--ok:#0ca30c;--wn:#fab219;--no:#d03b3b;
- --r0:#0ca30c;--r1:#3f8ed0;--r2:#fab219;--r3:#e07b39;--r4:#9166cc;--r5:#d03b3b}
+:root{--s1:#fcfcfb;--s2:#f4f4f1;--s3:#eceae4;--bd:#e0e0da;--tp:#0b0b0b;--ts:#4a4a46;
+ /* --tm 은 라벨·캡션에 쓰인다(11~12.5px). 가장 밝은 배경(--s3)에서도 4.5:1 을 넘겨야 한다.
+    이전 #84837c 는 3.16~3.71 로 미달이었다. 다크 모드는 그대로 둔다 — 거기서는 통과한다. */
+ --tm:#6b6a63;
+ /* 링크도 본문 크기다. #3f8ed0 은 3.18~3.41 이었다. */
+ --ac:#2b6ea6;
+ --ok:#0a8a0a;--wn:#fab219;--no:#d03b3b;
+ /* 권고 태그 — 배경이 밝으면 흰 글씨로는 읽히지 않는다.
+    R2(#fab219)+흰글씨는 1.83:1 이었다. 밝은 배경에는 어두운 글씨를 얹는다. */
+ --r0:#0a8a0a;--r0-fg:#fff;
+ --r1:#2b6ea6;--r1-fg:#fff;
+ --r2:#fab219;--r2-fg:#3a2a00;
+ --r3:#e07b39;--r3-fg:#2e1400;
+ --r4:#7d55b8;--r4-fg:#fff;
+ --r5:#d03b3b;--r5-fg:#fff}
 @media(prefers-color-scheme:dark){:root:not([data-theme=light]){--s1:#1a1a19;--s2:#232322;
  --s3:#2b2b29;--bd:#3a3a38;--tp:#fff;--ts:#c3c2b7;--tm:#8f8e86}}
 body{margin:0;background:var(--s1);color:var(--tp);
  font:14px/1.65 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",Pretendard,sans-serif}
 a{color:var(--ac);text-decoration:none}a:hover{text-decoration:underline}
+/* 키보드로 옮겨 다닐 때 지금 어디에 있는지 보여야 한다.
+   이전에는 input 에만 초점 표시가 있었고 button·a·details 에는 없었다.
+   검토 화면은 버튼만 130개가 넘는다 — 키보드로 훑는 것이 자연스러운 사용법이다. */
+:where(a,button,summary,[tabindex]):focus-visible{outline:2px solid var(--ac);
+ outline-offset:2px;border-radius:4px}
+input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--ac);
+ outline-offset:-1px}
 .top{border-bottom:1px solid var(--bd);background:var(--s2)}
 .top .in{max-width:1080px;margin:0 auto;padding:0 20px;display:flex;align-items:center;
  gap:20px;flex-wrap:wrap;min-height:48px}
@@ -57,7 +76,7 @@ tbody tr:hover td{background:var(--s2)}
 label{display:block;font-size:12px;color:var(--tm);margin-bottom:4px}
 input,select,textarea{font:inherit;font-size:13px;padding:7px 11px;width:100%;
  border:1px solid var(--bd);border-radius:7px;background:var(--s1);color:var(--tp)}
-input:focus,select:focus,textarea:focus{outline:2px solid var(--ac);outline-offset:-1px}
+
 .row{display:grid;gap:12px;margin-bottom:14px}
 .row.two{grid-template-columns:1fr 1fr}.row.three{grid-template-columns:1fr 1fr 1fr}
 button{font:inherit;font-size:13px;padding:7px 16px;border-radius:7px;cursor:pointer;
