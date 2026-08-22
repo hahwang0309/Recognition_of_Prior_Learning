@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -14,10 +14,11 @@ from krpl_core.queue import enqueue, stats, stuck, worker_alive
 from services.catalog import CatalogRepo
 from services.ingest import UploadRejected, ingest_submission, store
 from krpl_core.audit import AuditStore, read_artifact
+from services.assess.case_state import case_state
 from services.report import (
     env_label, render_artifact, render_audit_case, render_audit_list,
-    render_dashboard, render_home, render_new, render_review, render_stats,
-    render_track_a, render_upload,
+    render_case, render_dashboard, render_evidence, render_home, render_new,
+    render_review, render_stats, render_track_a, render_upload,
 )
 from services.review import record_decision, review_summary, save_element_review
 from services.gateway.schemas import (
@@ -262,10 +263,9 @@ def _need_assessment(s: Session, aid: int) -> None:
 def review_screen(aid: int, s: Session = Depends(get_session)):
     """전문가 검토 화면. 근거를 읽고 요소마다 의견을 남긴다."""
     _need_assessment(s, aid)
-    track = s.execute(text("""SELECT s.track FROM assessment a
-                              JOIN submission s ON s.id=a.submission_id WHERE a.id=:i"""),
-                      {"i": aid}).scalar_one()
-    return HTMLResponse(render_review(s, aid) if track == "B" else render_track_a(s, aid))
+    kind = s.execute(text("SELECT kind FROM assessment WHERE id=:i"),
+                     {"i": aid}).scalar_one()
+    return HTMLResponse(render_track_a(s, aid) if kind == "time" else render_review(s, aid))
 
 
 @app.get("/assessments/{aid}/review/summary", response_model=ReviewSummaryOut)
@@ -512,6 +512,17 @@ def dashboard(s: Session = Depends(get_session)):
                            ORDER BY z.id DESC LIMIT 1) a ON true
         LEFT JOIN final_decision fd ON fd.submission_id = sub.id
         ORDER BY sub.received_at DESC""")).mappings()]
+
+    # 「다음 할 일」과 시간 요약은 case_state 가 정한다 — 목록과 개요가
+    # 각자 SQL 로 답하면 반드시 어긋난다. 건수가 적어 그대로 돈다.
+    for r in rows:
+        st = case_state(s, r["id"])
+        if st is None:
+            continue
+        r["next_step"] = st.next_step
+        r["hours_note"] = (f"확인 {st.credited_hours}h / 총 {st.total_hours}h"
+                           if st.time else f"총 {st.total_hours}h")
+
     return HTMLResponse(render_dashboard(
         rows, stats(s), worker_alive(s), len(get_rubric().pending_decisions),
         _env(s), stuck=stuck(s)))
@@ -584,3 +595,56 @@ def upload_files(sid: int,
 
     r = ingest_submission(s, sid, docs)
     return IngestOut(**r.summary(), submission_id=sid)
+
+
+# ── 심사 개요와 보고서 ────────────────────────────────────────────
+# 접수번호를 누르면 여기로 온다. 심사는 보고서를 만드는 일이고,
+# 판단 입력은 보고서를 읽은 다음이다. 그래서 화면이 갈라져 있다.
+
+@app.get("/submissions/{sid}", response_class=HTMLResponse)
+def case_screen(sid: int, s: Session = Depends(get_session)):
+    """심사 개요 — 어디까지 왔고 다음에 무엇을 할지."""
+    out = render_case(s, sid)
+    if out is None:
+        raise HTTPException(404, "접수 건을 찾을 수 없습니다")
+    return HTMLResponse(out)
+
+
+@app.get("/submissions/{sid}/report/time", response_class=HTMLResponse)
+def time_report(sid: int, s: Session = Depends(get_session)):
+    """① 시간 대조 보고서 — 기록으로 확인되는 이수 시간."""
+    aid = s.execute(text("""SELECT id FROM assessment
+                            WHERE submission_id=:i AND kind='time'
+                            ORDER BY id DESC LIMIT 1"""), {"i": sid}).scalar()
+    if aid is None:
+        raise HTTPException(404, "시간 대조 결과가 없습니다. 서류를 먼저 올리세요")
+    return HTMLResponse(render_track_a(s, aid))
+
+
+@app.get("/submissions/{sid}/report/evidence", response_class=HTMLResponse)
+def evidence_report(sid: int, s: Session = Depends(get_session)):
+    """② 근거 분석 보고서 — 제출 자료에서 무엇이 확인됐나. 읽기 전용."""
+    aid = s.execute(text("""SELECT id FROM assessment
+                            WHERE submission_id=:i AND kind='evidence' AND status='done'
+                            ORDER BY id DESC LIMIT 1"""), {"i": sid}).scalar()
+    if aid is None:
+        raise HTTPException(404, "근거 분석 결과가 없습니다")
+    return HTMLResponse(render_evidence(s, aid))
+
+
+@app.post("/submissions/{sid}/analyze")
+def start_analysis(sid: int, s: Session = Depends(get_session)):
+    """② 근거 분석을 시작한다. 개요 화면의 버튼이 부른다.
+
+    화면에서 온 요청이므로 끝나면 개요로 돌려보낸다 — JSON 을 띄우지 않는다.
+    """
+    st = case_state(s, sid)
+    if st is None:
+        raise HTTPException(404, "접수 건을 찾을 수 없습니다")
+    if st.evidence and (st.evidence.running or st.evidence.done):
+        return RedirectResponse(f"/submissions/{sid}", status_code=303)
+    if not st.can_analyze:
+        raise HTTPException(409, "근거 분석에 쓸 자료가 없습니다")
+    enqueue(s, "track_b", {"submission_id": sid, "profile": None})
+    s.execute(text("UPDATE submission SET status='queued' WHERE id=:i"), {"i": sid})
+    return RedirectResponse(f"/submissions/{sid}", status_code=303)

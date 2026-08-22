@@ -15,6 +15,20 @@ e = lambda x: html.escape(str(x) if x is not None else "")   # noqa: E731
 NAV = [("/", "홈"), ("/cases", "접수 현황"), ("/submissions/new", "새 접수"),
        ("/audit", "감사"), ("/stats", "운영 통계")]
 
+# 권고 코드는 기준서에 있는 말이라 남기되, **항상 뜻을 붙여 쓴다.**
+# 화면마다 따로 적어 두면 같은 코드가 다른 말로 불린다. 여기 한 벌만 둔다.
+#   코드: (색 class, 짧은 이름, 무엇을 하라는 뜻인가)
+REC = {"R0": ("r0", "기이수 인정검토", "이미 평가를 마친 항목 — 추가 확인 없음"),
+       "R1": ("r1", "서류 인정검토", "낸 서류만으로 판단"),
+       "R2": ("r2", "면접 확인", "화상면접으로 확인"),
+       "R3": ("r3", "실기 확인", "대면 실기·시연으로 확인"),
+       "R4": ("r4", "추가서류 요청", "서류 보완 후 재판단"),
+       "R5": ("r5", "미인정", "훈련 이수 필요")}
+
+
+def rec_name(code: str) -> str:
+    return REC.get(code, ("", code, ""))[1]
+
 BASE = """*{box-sizing:border-box}
 :root{--s1:#fcfcfb;--s2:#f4f4f1;--s3:#eceae4;--bd:#e0e0da;--tp:#0b0b0b;--ts:#4a4a46;
  /* --tm 은 라벨·캡션에 쓰인다(11~12.5px). 가장 밝은 배경(--s3)에서도 4.5:1 을 넘겨야 한다.
@@ -103,7 +117,16 @@ footer{color:var(--tm);font-size:11.5px;border-top:1px solid var(--bd);padding-t
  .top nav a{padding:12px 0;white-space:nowrap;font-size:12.5px}
  .top .env{display:none}
  .wrap{padding:20px 14px 80px}
- h1{font-size:20px}}"""
+ h1{font-size:20px}}
+/* 보고서는 인쇄해서 회의에 들고 간다. 차림표·버튼은 종이에 쓸모가 없다. */
+@media print{
+ .top,.noprint,footer .noprint{display:none!important}
+ body{background:#fff;color:#000;font-size:10.5pt}
+ .wrap{max-width:none;padding:0}
+ .card,.kpi,.note{break-inside:avoid;background:#fff;border-color:#bbb}
+ h2{break-after:avoid}
+ tr,.row{break-inside:avoid}
+ a{color:#000;text-decoration:none}}"""
 
 
 def page_open(title: str, *, css: str = "", here: str = "", env: str = "") -> str:

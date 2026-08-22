@@ -9,16 +9,17 @@ from datetime import datetime
 
 from services.report.layout import e, page
 
-# 상태 → (표시, 배지, 다음 할 일)
+# 상태 → (묶음 이름, 배지). 「다음 할 일」은 여기서 정하지 않는다 —
+# case_state.next_step 이 정한다. 목록과 개요가 다른 말을 하면 안 된다.
 FLOW = {
-    "received":    ("서류 대기",   "",   ("서류 올리기", "/submissions/{id}/upload")),
-    "ingested":    ("수집 완료",   "ac", ("판정 시작", "assess")),
-    "queued":      ("판정 대기",   "ac", None),
-    "assessing":   ("판정 중",     "ac", None),
-    "assessed":    ("검토 대기",   "wn", ("검토 열기", "/assessments/{aid}/review")),
-    "needs_review": ("확인 필요",  "no", ("검토 열기", "/assessments/{aid}/review")),
-    "decided":     ("완료",       "ok", ("결과 보기", "/assessments/{aid}/review")),
-    "failed":      ("실패",       "no", ("다시 판정", "assess")),
+    "received":    ("서류 대기",   ""),
+    "ingested":    ("분석 대기",   "wn"),
+    "queued":      ("분석 대기",   "ac"),
+    "assessing":   ("분석 중",     "ac"),
+    "assessed":    ("검토 대기",   "wn"),
+    "needs_review": ("확인 필요",  "no"),
+    "decided":     ("완료",       "ok"),
+    "failed":      ("실패",       "no"),
 }
 ORDER = ["received", "ingested", "queued", "assessing", "assessed",
          "needs_review", "failed", "decided"]
@@ -85,19 +86,17 @@ def render_dashboard(rows: list[dict], queue: dict, worker_ok: bool,
         items = by.get(st)
         if not items:
             continue
-        label, badge, nxt = FLOW.get(st, (st, "", None))
+        label, badge = FLOW.get(st, (st, ""))
         body = ""
         for r in items:
-            act = ""
-            if nxt:
-                txt, href = nxt
-                if href == "assess":
-                    act = (f'<button class="sm" onclick="assess({r["id"]},this)">'
-                           f'{txt}</button>')
-                elif "{aid}" in href and r["aid"]:
-                    act = f'<a class="st ac" href="{href.format(aid=r["aid"])}">{txt}</a>'
-                elif "{id}" in href:
-                    act = f'<a class="st ac" href="{href.format(id=r["id"])}">{txt}</a>'
+            nxt = r.get("next_step")
+            if not nxt:
+                act = f'<a class="st" href="/submissions/{r["id"]}">개요 열기</a>'
+            elif nxt[1] == "analyze":
+                act = (f'<button class="sm" onclick="analyze({r["id"]},this)">'
+                       f'{e(nxt[0])}</button>')
+            else:
+                act = f'<a class="st ac" href="{e(nxt[1])}">{e(nxt[0])}</a>'
             prog = ""
             if st in ("queued", "assessing"):
                 # 값은 비워 두고 진행률만 따로 긁어 채운다 (통째 새로고침 없이)
@@ -112,10 +111,9 @@ def render_dashboard(rows: list[dict], queue: dict, worker_ok: bool,
                    f'{r["recognized_hours"]}/{r["total_hours"]}h</span>'
                    if r["decision"] else "")
             body += f"""<tr>
- <td><a href="/audit/{e(r['case_number'])}"><b>{e(r['case_number'])}</b></a>
-     <span class="st">{e(r['track'])}</span></td>
+ <td><a href="/submissions/{r['id']}"><b>{e(r['case_number'])}</b></a></td>
  <td>{e(r['official_name'] or r['target_program_id'])}
-     <span class="mini">서류 {r['n_doc']} · 조각 {r['n_frag']}</span></td>
+     <span class="mini">서류 {r['n_doc']} · {e(r.get('hours_note') or '')}</span></td>
  <td>{prog}</td>
  <td>{fin}</td>
  <td class="n mini">{r['received_at']:%m-%d %H:%M}</td>
@@ -130,7 +128,8 @@ def render_dashboard(rows: list[dict], queue: dict, worker_ok: bool,
                 '<a href="/submissions/new">새 접수</a>로 시작하세요.</div>')
 
     body = f"""<h1>접수 현황</h1>
-<p class="sub">단계별로 묶었습니다. 각 건의 오른쪽 버튼이 다음에 할 일입니다.</p>
+<p class="sub">단계별로 묶었습니다. 접수번호를 누르면 그 건의 심사 개요가 열리고,
+ 오른쪽 버튼이 다음에 할 일입니다.</p>
 <div style="margin-bottom:16px"><a href="/submissions/new"
  style="display:inline-block;font-weight:600;padding:8px 18px;border-radius:8px;
  background:var(--tp);color:var(--s1)">＋ 새 접수 시작</a></div>
@@ -171,14 +170,12 @@ async function tick() {
 }
 tick();
 
-async function assess(id, btn) {
+async function analyze(id, btn) {
   btn.disabled = true; btn.textContent = '시작 중…';
-  const r = await fetch(`/submissions/${id}/assess`, {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({force: true})});
+  const r = await fetch(`/submissions/${id}/analyze`, {method: 'POST'});
   if (!r.ok) {
-    const d = await r.json();
-    btn.disabled = false; btn.textContent = '판정 시작';
+    const d = await r.json().catch(() => ({}));
+    btn.disabled = false; btn.textContent = '근거 분석 시작';
     return alert(d.detail || '시작하지 못했습니다');
   }
   location.reload();

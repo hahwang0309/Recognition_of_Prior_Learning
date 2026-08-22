@@ -330,12 +330,17 @@ def test_screen_has_no_methodology_jargon(client, aid):
         assert bad not in h, f"내부 용어 노출: {bad}"
 
 
-def test_track_a_uses_its_own_report(client):
+def test_time_comparison_uses_its_own_report(client):
+    """시간 대조와 근거 분석은 화면이 다르다. 가르는 것은 assessment.kind 다.
+
+    예전에는 submission.track 으로 갈랐다. 그런데 한 접수 건이 둘 다 가질 수
+    있게 되면서 그 기준으로는 갈리지 않는다.
+    """
     with session_scope() as s:
-        aid = s.execute(text("""SELECT a.id FROM assessment a
-                                JOIN submission s ON s.id=a.submission_id
-                                WHERE s.track='A' ORDER BY a.id DESC LIMIT 1""")).scalar()
+        aid = s.execute(text("""SELECT id FROM assessment WHERE kind='time'
+                                ORDER BY id DESC LIMIT 1""")).scalar()
     if aid is None:
-        pytest.skip("Track A 판정 없음")
+        pytest.skip("시간 대조 판정 없음")
     h = client.get(f"/assessments/{aid}/review").text
-    assert "Track A 심사 보고서" in h
+    assert "시간 대조 보고서" in h
+    assert "Track A" not in h                       # 내부 용어를 화면에 쓰지 않는다
