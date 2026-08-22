@@ -127,6 +127,15 @@ details.grp>summary .st.ok{background:var(--ok);color:#fff}
  padding:9px 12px;margin:9px 0}
 .act{display:flex;gap:6px;flex-wrap:wrap;align-items:center;
  padding:0 15px 11px 33px}
+/* 33개 줄에 버튼 4개 + 입력칸이 늘 펼쳐져 있으면 컨트롤이 130개가 넘는다.
+   아직 정하지 않은 줄에서만 보이고, 정한 줄은 결과만 남긴다.
+   펼쳤거나 마우스를 올렸거나 초점이 들어오면 언제든 다시 나온다. */
+.el.done .act{padding-bottom:9px}
+.el.done .act .d:not(.on){display:none}
+.el.done:hover .act .d,.el.done:focus-within .act .d,
+.el.done.open .act .d{display:inline-block}
+.el.done .act .m{opacity:.55}
+.el.done:hover .act .m,.el.done:focus-within .act .m{opacity:1}
 button.d{font:inherit;font-size:12.3px;padding:4px 13px;border-radius:16px;cursor:pointer;
  border:1px solid var(--bd);background:var(--s1);color:var(--ts)}
 button.d:hover{border-color:var(--tm)}
@@ -149,7 +158,14 @@ button.go{font:inherit;font-size:12.8px;padding:6px 18px;border-radius:7px;borde
  background:var(--tp);color:var(--s1);cursor:pointer}
 button.go:disabled{opacity:.4;cursor:not-allowed}
 footer{color:var(--tm);font-size:11.5px;border-top:1px solid var(--bd);padding-top:14px;margin-top:28px}
-@media(max-width:680px){.act{flex-direction:column;align-items:stretch}input.m{min-width:0}}"""
+@media(max-width:680px){
+ .el .hd{padding-left:15px}
+ .el .dt{padding-left:15px}
+ .act{padding-left:15px;gap:4px}
+ .act .d{flex:1 1 auto;min-width:0;font-size:12px;padding:6px 8px}
+ .act .m{flex:1 1 100%;min-width:0;order:9}
+ details.grp>summary{gap:6px}
+ .gb{margin-left:0;flex:1 1 100%}}"""
 
 
 def _evidence(ev: list[dict], frags: dict[str, str]) -> str:
