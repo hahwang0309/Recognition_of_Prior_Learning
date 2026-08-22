@@ -32,7 +32,8 @@ DEC = {"인정": "ok", "조건부인정": "cond", "불인정": "no", "보류": "
 
 CSS = """*{box-sizing:border-box}
 :root{--s1:#fcfcfb;--s2:#f4f4f1;--s3:#eceae4;--bd:#e0e0da;--tp:#0b0b0b;--ts:#4a4a46;--tm:#84837c;
- --r0:#0ca30c;--r1:#3f8ed0;--r2:#fab219;--r3:#e07b39;--r4:#9166cc;--r5:#d03b3b;
+ --r0:#0a8a0a;--r0-fg:#fff;--r1:#2b6ea6;--r1-fg:#fff;--r2:#fab219;--r2-fg:#3a2a00;
+ --r3:#e07b39;--r3-fg:#2e1400;--r4:#7d55b8;--r4-fg:#fff;--r5:#d03b3b;--r5-fg:#fff;
  --ok:#0ca30c;--cond:#fab219;--no:#d03b3b;--hold:#84837c;--warn:#d03b3b}
 @media(prefers-color-scheme:dark){:root:not([data-theme=light]){--s1:#1a1a19;--s2:#232322;
  --s3:#2b2b29;--bd:#3a3a38;--tp:#fff;--ts:#c3c2b7;--tm:#8f8e86}}
@@ -87,7 +88,7 @@ details.grp>summary b{font-variant-numeric:tabular-nums}
 .el.open .dt{display:block}
 .eh .en{font-weight:600;font-size:14px}
 .eh .ec{font-size:10.5px;color:var(--tm);font-variant-numeric:tabular-nums}
-.tag{font-size:11.3px;padding:1.5px 8px;border-radius:11px;color:#fff;white-space:nowrap}
+.tag{font-size:11.3px;padding:1.5px 8px;border-radius:11px;white-space:nowrap;font-weight:600}
 .flag{font-size:11.3px;padding:1.5px 8px;border-radius:11px;border:1px solid var(--warn);
  color:var(--warn);white-space:nowrap}
 .why{font-size:12.8px;color:var(--ts);margin:0 0 9px}
@@ -237,7 +238,7 @@ def _element(x: dict, frags: dict[str, str], rv: dict, names: dict[str, str]) ->
      data-rec="{e(x['recommendation'])}" data-by="{e(p.get('decided_by') or 'ai')}">
 <div class="hd" onclick="fold(this)">
  <span class="tw">▸</span>
- <span class="tag" style="background:var(--{cls})">{e(x['recommendation'])}</span>
+ <span class="tag" style="background:var(--{cls});color:var(--{cls}-fg)">{e(x['recommendation'])}</span>
  <span class="en">{e(name)}</span>
  <span class="mks">{marks}</span>
  <span class="cnt">근거 {n_ev}{f' · 빈 항목 {n_un}' if n_un else ''}</span>
