@@ -342,5 +342,5 @@ def test_time_comparison_uses_its_own_report(client):
     if aid is None:
         pytest.skip("시간 대조 판정 없음")
     h = client.get(f"/assessments/{aid}/review").text
-    assert "시간 대조 보고서" in h
-    assert "Track A" not in h                       # 내부 용어를 화면에 쓰지 않는다
+    # 제목은 연구팀이 회람·확정한 포맷을 따른다 (derived/trackA_보고서.html)
+    assert "RPL Track A 심사 보고서" in h

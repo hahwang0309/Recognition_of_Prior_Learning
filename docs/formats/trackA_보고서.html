@@ -1,0 +1,646 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RPL Track A 심사 보고서</title>
+<style>
+*{box-sizing:border-box}
+.viz{--s1:#fcfcfb;--s2:#f4f4f1;--bd:#e3e3dd;--tp:#0b0b0b;--ts:#52514e;--tm:#84837c;
+ --good:#0ca30c;--warn:#fab219;--crit:#d03b3b;--none:#a9a9a2;--req:#d03b3b;
+ color-scheme:light;background:var(--s1);color:var(--tp)}
+@media (prefers-color-scheme:dark){:root:where(:not([data-theme=light])) .viz{
+ --s1:#1a1a19;--s2:#232322;--bd:#3a3a38;--tp:#fff;--ts:#c3c2b7;--tm:#8f8e86;--none:#6b6b66;color-scheme:dark}}
+:root[data-theme=dark] .viz{--s1:#1a1a19;--s2:#232322;--bd:#3a3a38;--tp:#fff;--ts:#c3c2b7;--tm:#8f8e86;--none:#6b6b66;color-scheme:dark}
+body{margin:0;background:var(--s1)}
+.viz{font:14px/1.55 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Malgun Gothic",sans-serif;
+ max-width:1080px;margin:0 auto;padding:32px 20px 64px}
+h1{font-size:26px;margin:0 0 6px;letter-spacing:-.02em}
+.lead{color:var(--ts);margin:0 0 22px;font-size:14px}
+.note{background:var(--s2);border:1px solid var(--bd);border-radius:10px;padding:14px 16px;margin:0 0 26px;font-size:13px;color:var(--ts)}
+.note b{color:var(--tp)}
+.note table{width:100%;table-layout:fixed;border-collapse:collapse;margin-top:10px;font-size:12.5px}
+.note td,.note th{word-break:normal;overflow-wrap:break-word;white-space:normal}
+.note th,.note td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--bd);vertical-align:top}
+.note th{color:var(--tm);font-weight:600}
+.card{border:1px solid var(--bd);border-radius:14px;padding:20px;margin:0 0 22px;background:var(--s1)}
+.ch{margin-bottom:16px}
+.tag{display:inline-block;font-size:11.5px;font-weight:700;letter-spacing:.04em;color:var(--ts);
+ background:var(--s2);border:1px solid var(--bd);border-radius:999px;padding:3px 10px;margin-bottom:8px}
+.ch h2{font-size:18px;margin:0 0 4px;letter-spacing:-.01em}
+.arw{color:var(--tm);font-weight:400;margin:0 4px}
+.sub{margin:0;font-size:12.5px;color:var(--tm)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:18px}
+.kpi{background:var(--s2);border:1px solid var(--bd);border-radius:10px;padding:11px 13px}
+.kpi>span{display:block;font-size:11.5px;color:var(--tm);margin-bottom:3px}
+.kpi b{font-size:23px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.kpi b i{font-size:12.5px;font-weight:500;font-style:normal;color:var(--ts);margin-left:2px}
+.kpi em{display:block;font-style:normal;font-size:11.5px;color:var(--tm);margin-top:2px}
+.kpi.hl{border-color:var(--tm)}
+.mini{font-size:19px!important;font-variant-numeric:tabular-nums;white-space:nowrap}
+.mini span{display:inline!important;font-size:19px;font-weight:700}
+.mini .good{color:var(--good)}.mini .warn{color:#a06f00}.mini .crit{color:var(--crit)}.mini .none{color:var(--none)}
+@media (prefers-color-scheme:dark){:root:where(:not([data-theme=light])) .mini .warn{color:var(--warn)}}
+:root[data-theme=dark] .mini .warn{color:var(--warn)}
+.stackwrap{margin:0 0 18px}
+.stack{display:flex;height:12px;border-radius:6px;overflow:hidden;background:var(--s2);gap:2px}
+.sg{height:100%}
+.sg.good{background:var(--good)}.sg.warn{background:var(--warn)}
+.sg.crit{background:var(--crit);background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.42) 0 3px,transparent 3px 7px)}
+.sg.none{background:var(--none)}
+.slab{margin-top:6px;font-size:11.5px;color:var(--tm)}
+.slab .good{color:var(--good)}.slab .warn{color:#a06f00}.slab .crit{color:var(--crit)}.slab .none{color:var(--tm)}
+@media (prefers-color-scheme:dark){:root:where(:not([data-theme=light])) .slab .warn{color:var(--warn)}}
+:root[data-theme=dark] .slab .warn{color:var(--warn)}
+.plot{display:flex;flex-direction:column;gap:2px}
+.row{display:grid;grid-template-columns:minmax(150px,1.35fr) minmax(120px,2.4fr) 78px 88px;
+ gap:12px;align-items:center;padding:8px 0 4px}
+.nm{font-size:12.8px;line-height:1.35;min-width:0}
+.code{display:block;font-size:10.5px;color:var(--tm);font-variant-numeric:tabular-nums;letter-spacing:.02em}
+.track{position:relative;height:24px;background:var(--s2);border-radius:5px;overflow:visible}
+.fill{position:absolute;left:0;top:0;height:100%;border-radius:0 4px 4px 0;min-width:2px}
+.fill.good{background:var(--good)} .fill.warn{background:var(--warn)}
+.fill.crit{background:var(--crit);background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.42) 0 3px,transparent 3px 7px)}
+.fill.none{background:transparent;border:1.5px dashed var(--none);border-radius:5px}
+.reql{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--req);border-radius:1px}
+.reqv{position:absolute;left:4px;top:-15px;font-size:10px;color:var(--req);white-space:nowrap;font-variant-numeric:tabular-nums}
+.minl{position:absolute;top:2px;bottom:2px;width:0;border-left:1.5px dotted var(--tm);opacity:.75}
+.hrs{text-align:right;font-size:12.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.hrs b{font-size:14.5px}.hrs span{color:var(--tm);font-size:11.5px}
+.st{font-size:11.5px;white-space:nowrap;display:flex;align-items:center;gap:5px;font-weight:600}
+.st i{font-style:normal;font-size:10px}
+.st.good{color:var(--good)} .st.warn{color:#a06f00} .st.crit{color:var(--crit)} .st.none{color:var(--tm);font-weight:500}
+@media (prefers-color-scheme:dark){:root:where(:not([data-theme=light])) .st.warn{color:var(--warn)}}
+:root[data-theme=dark] .st.warn{color:var(--warn)}
+.lgd{display:flex;flex-wrap:wrap;gap:16px;padding:13px 16px;background:var(--s2);
+ border:1px solid var(--bd);border-radius:10px;margin-bottom:24px;font-size:12.5px;color:var(--ts)}
+.lg{display:flex;align-items:center;gap:6px}
+.sw{width:22px;height:11px;border-radius:3px;flex:none}
+.sw.good{background:var(--good)}.sw.warn{background:var(--warn)}
+.sw.crit{background:var(--crit);background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.42) 0 3px,transparent 3px 7px)}
+.sw.none{background:transparent;border:1.5px dashed var(--none)}
+.sw.req{background:var(--req);width:2px;height:16px;border-radius:1px}
+.sw.min{width:0;border-left:1.5px dotted var(--tm);height:16px}
+.tbl{margin-top:16px;border-top:1px solid var(--bd);padding-top:12px}
+.tbl summary{cursor:pointer;font-size:12.5px;color:var(--ts)}
+.tw{overflow-x:auto;margin-top:10px}
+table{border-collapse:collapse;width:100%;font-size:11.8px;white-space:nowrap}
+th,td{padding:5px 9px;border-bottom:1px solid var(--bd);text-align:left}
+th{color:var(--tm);font-weight:600}
+td.n{text-align:right;font-variant-numeric:tabular-nums}
+td.m{font-variant-numeric:tabular-nums;color:var(--ts)}
+footer{color:var(--tm);font-size:12px;border-top:1px solid var(--bd);padding-top:16px;margin-top:8px}
+@media(max-width:720px){.row{grid-template-columns:1fr;gap:4px;padding:9px 0;border-bottom:1px solid var(--bd)}
+ .hrs{text-align:left}.reqv{display:none}}
+</style>
+</head>
+<body>
+<div class="viz">
+<h1>RPL Track A 심사 보고서</h1>
+<p class="lead">과정평가형 자격 보유자가 일학습병행 종목을 지망할 때의 능력단위별 시간 충족 판정.
+설계안 <i>RPL AI HEAT map 구성 안(2026-08-03)</i> Track A 기준.</p>
+
+<div class="note">
+<b>데이터 출처</b> — 모든 수치는 <code>krpl.sqlite</code>에서 산출된 실측값입니다.
+요구시간은 고용노동부 고시 제2025-35호 일학습병행 교육훈련기준, 이수시간은 2027년 시행 과정평가형 편성기준의 <b>기준값</b>입니다.
+지원자 개인 데이터는 사용하지 않았습니다(<b>모드 A</b> — 입력은 보유 자격·목표 종목 2개뿐).
+시나리오 4건은 판정 양상이 서로 다른 조합을 실제 데이터에서 선정한 것입니다.
+<table>
+<tr><th style="width:22%">항목</th><th style="width:39%">설계안 원안</th><th>이번 구현</th></tr>
+<tr><td>막대 방향</td><td>세로 막대<br>(가로축=능력단위, 세로축=시간)</td><td><b>가로 막대</b><br>능력단위명이 길어 라벨 가독성 확보 목적</td></tr>
+<tr><td>색상</td><td>노랑=문제없이 이수<br>초록=추가 증빙 필요<br>회색=불인정</td><td><b>초록=충족 / 노랑=조정범위 / 빨강(빗금)=시간부족 / 회색=미이수</b><br>원안은 초록이 “확인 필요”이나 통용 규범(초록=양호)과 반대라 오독 위험이 커 변경. 되돌릴 수 있음</td></tr>
+<tr><td>구간 수</td><td>3구간</td><td><b>4구간</b><br>훈련기준의 “−50%까지 조정 가능” 조항을 반영해 <i>조정범위내</i>와 <i>시간부족</i>을 분리</td></tr>
+<tr><td>보조 표시</td><td>빨간선(최소 훈련시간)</td><td>빨간선 + <b>점선(−50% 하한)</b> 추가</td></tr>
+</table>
+<div style="margin-top:10px">
+<b>인정률 지표 정의</b> — <b>능력단위 커버리지</b>는 능력단위가 겹치는 비율일 뿐 시간 충족과 무관합니다.
+실제 면제 가능 시간은 <b>인정 시간 — 확정</b>(이수≥요구)이고, 훈련기준의 “−50%까지 조정 가능” 조항을 적용하면
+<b>조정 적용 시</b>까지 올라갑니다. 시나리오 ②처럼 <b>커버리지 100%인데 확정 인정률 0%</b>인 경우가 있으므로
+두 지표를 반드시 함께 읽어야 합니다.
+</div>
+<div style="margin-top:10px">
+<b>접근성</b> — 상태색 초록·빨강은 적록색약(deutan)에서 ΔE 4.1로 구분이 어렵습니다(검증 스크립트 실측).
+따라서 모든 막대에 <b>아이콘 + 상태 텍스트</b>를 상시 표기하고 시간부족에는 <b>빗금</b>을 넣어,
+색이 단독으로 의미를 전달하지 않도록 했습니다. 각 카드 하단에 데이터 표도 제공합니다.
+</div>
+</div>
+
+<div class="lgd">
+ <div class="lg"><span class="sw good"></span>충족 — 이수 ≥ 요구</div>
+ <div class="lg"><span class="sw warn"></span>조정범위 — 요구의 50~99% (−50% 조정 적용 가능)</div>
+ <div class="lg"><span class="sw crit"></span>시간부족 — 요구의 50% 미만</div>
+ <div class="lg"><span class="sw none"></span>미이수 — 해당 능력단위 없음</div>
+ <div class="lg"><span class="sw req"></span>요구 훈련시간</div>
+ <div class="lg"><span class="sw min"></span>−50% 하한</div>
+</div>
+
+<section class="card">
+ <header class="ch">
+   <div class="tag">①  완전인정형</div>
+   <h2>제빵기능사 <span class="arw">→</span> 제빵_L2</h2>
+   <p class="sub">식품가공 · 보유 기능사(총 340h, 필수 270h) · 목표 필수능력단위 7개 / 205시간</p>
+ </header>
+ <div class="kpis">
+   <div class="kpi"><span>능력단위 커버리지</span><b>100<i>%</i></b>
+     <em>7/7개 단위가 겹침</em></div>
+   <div class="kpi hl"><span>인정 시간 — 확정</span><b>100<i>%</i></b>
+     <em>205h / 205h · 시간까지 충족</em></div>
+   <div class="kpi hl"><span>인정 시간 — 조정 적용 시</span><b>100<i>%</i></b>
+     <em>205h / 205h · −50% 조항 적용</em></div>
+   <div class="kpi"><span>추가 훈련·확인 필요</span><b>0<i>시간</i></b>
+     <em>부족 0h + 미이수 0h</em></div>
+ </div>
+ <div class="stackwrap"><div class="stack"><div class="sg good" style="width:100.000%" title="충족 205시간"></div></div><div class="slab"><span class="good">충족 205h</span></div></div>
+ <div class="plot"><div class="row" title="식빵류 만들기
+요구 40h · 하한 20h
+이수 45h (기준값(편성기준))
+판정 완전충족 / 추정(하한도 조정범위내)">
+  <div class="nm"><span class="code">2102010221</span>식빵류 만들기</div>
+  <div class="track">
+    <div class="fill good" style="width:100.00%"></div>
+    <div class="minl" style="left:44.44%"></div>
+    <div class="reql" style="left:88.89%"><span class="reqv">40h</span></div>
+  </div>
+  <div class="hrs"><b>45</b><span>/40h</span></div>
+  <div class="st good"><i>●</i>충족</div>
+</div>
+<div class="row" title="단과자빵류 만들기
+요구 40h · 하한 20h
+이수 45h (기준값(편성기준))
+판정 완전충족 / 추정(하한도 조정범위내)">
+  <div class="nm"><span class="code">2102010222</span>단과자빵류 만들기</div>
+  <div class="track">
+    <div class="fill good" style="width:100.00%"></div>
+    <div class="minl" style="left:44.44%"></div>
+    <div class="reql" style="left:88.89%"><span class="reqv">40h</span></div>
+  </div>
+  <div class="hrs"><b>45</b><span>/40h</span></div>
+  <div class="st good"><i>●</i>충족</div>
+</div>
+<div class="row" title="하드계열빵류 만들기
+요구 40h · 하한 20h
+이수 45h (기준값(편성기준))
+판정 완전충족 / 추정(하한도 조정범위내)">
+  <div class="nm"><span class="code">2102010223</span>하드계열빵류 만들기</div>
+  <div class="track">
+    <div class="fill good" style="width:100.00%"></div>
+    <div class="minl" style="left:44.44%"></div>
+    <div class="reql" style="left:88.89%"><span class="reqv">40h</span></div>
+  </div>
+  <div class="hrs"><b>45</b><span>/40h</span></div>
+  <div class="st good"><i>●</i>충족</div>
+</div>
+<div class="row" title="빵류제품 스펀지 도우 반죽
+요구 30h · 하한 15h
+이수 30h (기준값(편성기준))
+판정 완전충족 / 추정(하한도 조정범위내)">
+  <div class="nm"><span class="code">2102010215</span>빵류제품 스펀지 도우 반죽</div>
+  <div class="track">
+    <div class="fill good" style="width:66.67%"></div>
+    <div class="minl" style="left:33.33%"></div>
+    <div class="reql" style="left:66.67%"><span class="reqv">30h</span></div>
+  </div>
+  <div class="hrs"><b>30</b><span>/30h</span></div>
+  <div class="st good"><i>●</i>충족</div>
+</div>
+<div class="row" title="빵류제품 위생안전관리
+요구 25h · 하한 12h
+이수 45h (기준값(편성기준))
+판정 완전충족 / 확정">
+  <div class="nm"><span class="code">2102010209</span>빵류제품 위생안전관리</div>
+  <div class="track">
+    <div class="fill good" style="width:100.00%"></div>
+    <div class="minl" style="left:26.67%"></div>
+    <div class="reql" style="left:55.56%"><span class="reqv">25h</span></div>
+  </div>
+  <div class="hrs"><b>45</b><span>/25h</span></div>
+  <div class="st good"><i>●</i>충족</div>
+</div>
+<div class="row" title="빵류제품 특수 반죽
+요구 20h · 하한 10h
+이수 30h (기준값(편성기준))
+판정 완전충족 / 확정">
+  <div class="nm"><span class="code">2102010216</span>빵류제품 특수 반죽</div>
+  <div class="track">
+    <div class="fill good" style="width:66.67%"></div>
+    <div class="minl" style="left:22.22%"></div>
+    <div class="reql" style="left:44.44%"><span class="reqv">20h</span></div>
+  </div>
+  <div class="hrs"><b>30</b><span>/20h</span></div>
+  <div class="st good"><i>●</i>충족</div>
+</div>
+<div class="row" title="빵류제품 스트레이트 반죽
+요구 10h · 하한 5h
+이수 30h (기준값(편성기준))
+판정 완전충족 / 확정">
+  <div class="nm"><span class="code">2102010214</span>빵류제품 스트레이트 반죽</div>
+  <div class="track">
+    <div class="fill good" style="width:66.67%"></div>
+    <div class="minl" style="left:11.11%"></div>
+    <div class="reql" style="left:22.22%"><span class="reqv">10h</span></div>
+  </div>
+  <div class="hrs"><b>30</b><span>/10h</span></div>
+  <div class="st good"><i>●</i>충족</div>
+</div></div>
+ <details class="tbl"><summary>데이터 표로 보기</summary>
+  <div class="tw"><table><thead><tr><th>능력단위코드</th><th>능력단위명</th><th>NCS표준</th><th>요구시간</th><th>하한(−50%)</th><th>이수시간</th><th>근거</th><th>판정</th><th>신뢰도</th></tr></thead><tbody>
+  <tr><td class=m>2102010221</td><td>식빵류 만들기</td><td class=n>40</td><td class=n>40</td><td class=n>20</td><td class=n>45</td><td>기준값(편성기준)</td><td>완전충족</td><td>추정(하한도 조정범위내)</td></tr><tr><td class=m>2102010222</td><td>단과자빵류 만들기</td><td class=n>40</td><td class=n>40</td><td class=n>20</td><td class=n>45</td><td>기준값(편성기준)</td><td>완전충족</td><td>추정(하한도 조정범위내)</td></tr><tr><td class=m>2102010223</td><td>하드계열빵류 만들기</td><td class=n>40</td><td class=n>40</td><td class=n>20</td><td class=n>45</td><td>기준값(편성기준)</td><td>완전충족</td><td>추정(하한도 조정범위내)</td></tr><tr><td class=m>2102010215</td><td>빵류제품 스펀지 도우 반죽</td><td class=n>40</td><td class=n>30</td><td class=n>15</td><td class=n>30</td><td>기준값(편성기준)</td><td>완전충족</td><td>추정(하한도 조정범위내)</td></tr><tr><td class=m>2102010209</td><td>빵류제품 위생안전관리</td><td class=n>20</td><td class=n>25</td><td class=n>12</td><td class=n>45</td><td>기준값(편성기준)</td><td>완전충족</td><td>확정</td></tr><tr><td class=m>2102010216</td><td>빵류제품 특수 반죽</td><td class=n>30</td><td class=n>20</td><td class=n>10</td><td class=n>30</td><td>기준값(편성기준)</td><td>완전충족</td><td>확정</td></tr><tr><td class=m>2102010214</td><td>빵류제품 스트레이트 반죽</td><td class=n>30</td><td class=n>10</td><td class=n>5</td><td class=n>30</td><td>기준값(편성기준)</td><td>완전충족</td><td>확정</td></tr>
+  </tbody></table></div></details>
+</section><section class="card">
+ <header class="ch">
+   <div class="tag">②  함정형</div>
+   <h2>축산기능사 <span class="arw">→</span> 가금사육_L3</h2>
+   <p class="sub">농림어업 · 보유 기능사(총 400h, 필수 300h) · 목표 필수능력단위 9개 / 365시간</p>
+ </header>
+ <div class="kpis">
+   <div class="kpi"><span>능력단위 커버리지</span><b>100<i>%</i></b>
+     <em>9/9개 단위가 겹침</em></div>
+   <div class="kpi hl"><span>인정 시간 — 확정</span><b>0<i>%</i></b>
+     <em>0h / 365h · 시간까지 충족</em></div>
+   <div class="kpi hl"><span>인정 시간 — 조정 적용 시</span><b>0<i>%</i></b>
+     <em>0h / 365h · −50% 조항 적용</em></div>
+   <div class="kpi"><span>추가 훈련·확인 필요</span><b>365<i>시간</i></b>
+     <em>부족 365h + 미이수 0h</em></div>
+ </div>
+ <div class="stackwrap"><div class="stack"><div class="sg crit" style="width:100.000%" title="시간부족 365시간"></div></div><div class="slab"><span class="crit">시간부족 365h</span></div></div>
+ <div class="plot"><div class="row" title="가금 입추전관리
+요구 50h · 하한 25h
+이수 15h (기준값(편성기준))
+판정 시간부족 / 추정(이수증명 필요)">
+  <div class="nm"><span class="code">2402020301</span>가금 입추전관리</div>
+  <div class="track">
+    <div class="fill crit" style="width:30.00%"></div>
+    <div class="minl" style="left:50.00%"></div>
+    <div class="reql" style="left:100.00%"><span class="reqv">50h</span></div>
+  </div>
+  <div class="hrs"><b>15</b><span>/50h</span></div>
+  <div class="st crit"><i>■</i>시간부족</div>
+</div>
+<div class="row" title="가금 축사내부 환경관리
+요구 50h · 하한 25h
+이수 5h (기준값(편성기준))
+판정 시간부족 / 추정(이수증명 필요)">
+  <div class="nm"><span class="code">2402020304</span>가금 축사내부 환경관리</div>
+  <div class="track">
+    <div class="fill crit" style="width:10.00%"></div>
+    <div class="minl" style="left:50.00%"></div>
+    <div class="reql" style="left:100.00%"><span class="reqv">50h</span></div>
+  </div>
+  <div class="hrs"><b>5</b><span>/50h</span></div>
+  <div class="st crit"><i>■</i>시간부족</div>
+</div>
+<div class="row" title="가금사육 시설장비관리
+요구 45h · 하한 22h
+이수 5h (기준값(편성기준))
+판정 시간부족 / 추정(이수증명 필요)">
+  <div class="nm"><span class="code">2402020308</span>가금사육 시설장비관리</div>
+  <div class="track">
+    <div class="fill crit" style="width:10.00%"></div>
+    <div class="minl" style="left:44.00%"></div>
+    <div class="reql" style="left:90.00%"><span class="reqv">45h</span></div>
+  </div>
+  <div class="hrs"><b>5</b><span>/45h</span></div>
+  <div class="st crit"><i>■</i>시간부족</div>
+</div>
+<div class="row" title="가금질병 진단
+요구 45h · 하한 22h
+이수 5h (기준값(편성기준))
+판정 시간부족 / 추정(이수증명 필요)">
+  <div class="nm"><span class="code">2402020313</span>가금질병 진단</div>
+  <div class="track">
+    <div class="fill crit" style="width:10.00%"></div>
+    <div class="minl" style="left:44.00%"></div>
+    <div class="reql" style="left:90.00%"><span class="reqv">45h</span></div>
+  </div>
+  <div class="hrs"><b>5</b><span>/45h</span></div>
+  <div class="st crit"><i>■</i>시간부족</div>
+</div>
+<div class="row" title="가금 방역관리
+요구 45h · 하한 22h
+이수 5h (기준값(편성기준))
+판정 시간부족 / 추정(이수증명 필요)">
+  <div class="nm"><span class="code">2402020315</span>가금 방역관리</div>
+  <div class="track">
+    <div class="fill crit" style="width:10.00%"></div>
+    <div class="minl" style="left:44.00%"></div>
+    <div class="reql" style="left:90.00%"><span class="reqv">45h</span></div>
+  </div>
+  <div class="hrs"><b>5</b><span>/45h</span></div>
+  <div class="st crit"><i>■</i>시간부족</div>
+</div>
+<div class="row" title="가금위생관리
+요구 45h · 하한 22h
+이수 5h (기준값(편성기준))
+판정 시간부족 / 추정(이수증명 필요)">
+  <div class="nm"><span class="code">2402020316</span>가금위생관리</div>
+  <div class="track">
+    <div class="fill crit" style="width:10.00%"></div>
+    <div class="minl" style="left:44.00%"></div>
+    <div class="reql" style="left:90.00%"><span class="reqv">45h</span></div>
+  </div>
+  <div class="hrs"><b>5</b><span>/45h</span></div>
+  <div class="st crit"><i>■</i>시간부족</div>
+</div>
+<div class="row" title="가금사육 생산관리
+요구 45h · 하한 22h
+이수 3h (기준값(편성기준))
+판정 시간부족 / 추정(이수증명 필요)">
+  <div class="nm"><span class="code">2402020317</span>가금사육 생산관리</div>
+  <div class="track">
+    <div class="fill crit" style="width:6.00%"></div>
+    <div class="minl" style="left:44.00%"></div>
+    <div class="reql" style="left:90.00%"><span class="reqv">45h</span></div>
+  </div>
+  <div class="hrs"><b>3</b><span>/45h</span></div>
+  <div class="st crit"><i>■</i>시간부족</div>
+</div>
+<div class="row" title="가금 사료관리
+요구 20h · 하한 10h
+이수 4h (기준값(편성기준))
+판정 시간부족 / 추정(이수증명 필요)">
+  <div class="nm"><span class="code">2402020303</span>가금 사료관리</div>
+  <div class="track">
+    <div class="fill crit" style="width:8.00%"></div>
+    <div class="minl" style="left:20.00%"></div>
+    <div class="reql" style="left:40.00%"><span class="reqv">20h</span></div>
+  </div>
+  <div class="hrs"><b>4</b><span>/20h</span></div>
+  <div class="st crit"><i>■</i>시간부족</div>
+</div>
+<div class="row" title="가금 분뇨처리
+요구 20h · 하한 10h
+이수 5h (기준값(편성기준))
+판정 시간부족 / 추정(이수증명 필요)">
+  <div class="nm"><span class="code">2402020307</span>가금 분뇨처리</div>
+  <div class="track">
+    <div class="fill crit" style="width:10.00%"></div>
+    <div class="minl" style="left:20.00%"></div>
+    <div class="reql" style="left:40.00%"><span class="reqv">20h</span></div>
+  </div>
+  <div class="hrs"><b>5</b><span>/20h</span></div>
+  <div class="st crit"><i>■</i>시간부족</div>
+</div></div>
+ <details class="tbl"><summary>데이터 표로 보기</summary>
+  <div class="tw"><table><thead><tr><th>능력단위코드</th><th>능력단위명</th><th>NCS표준</th><th>요구시간</th><th>하한(−50%)</th><th>이수시간</th><th>근거</th><th>판정</th><th>신뢰도</th></tr></thead><tbody>
+  <tr><td class=m>2402020301</td><td>가금 입추전관리</td><td class=n>50</td><td class=n>50</td><td class=n>25</td><td class=n>15</td><td>기준값(편성기준)</td><td>시간부족</td><td>추정(이수증명 필요)</td></tr><tr><td class=m>2402020304</td><td>가금 축사내부 환경관리</td><td class=n>50</td><td class=n>50</td><td class=n>25</td><td class=n>5</td><td>기준값(편성기준)</td><td>시간부족</td><td>추정(이수증명 필요)</td></tr><tr><td class=m>2402020308</td><td>가금사육 시설장비관리</td><td class=n>45</td><td class=n>45</td><td class=n>22</td><td class=n>5</td><td>기준값(편성기준)</td><td>시간부족</td><td>추정(이수증명 필요)</td></tr><tr><td class=m>2402020313</td><td>가금질병 진단</td><td class=n>45</td><td class=n>45</td><td class=n>22</td><td class=n>5</td><td>기준값(편성기준)</td><td>시간부족</td><td>추정(이수증명 필요)</td></tr><tr><td class=m>2402020315</td><td>가금 방역관리</td><td class=n>45</td><td class=n>45</td><td class=n>22</td><td class=n>5</td><td>기준값(편성기준)</td><td>시간부족</td><td>추정(이수증명 필요)</td></tr><tr><td class=m>2402020316</td><td>가금위생관리</td><td class=n>45</td><td class=n>45</td><td class=n>22</td><td class=n>5</td><td>기준값(편성기준)</td><td>시간부족</td><td>추정(이수증명 필요)</td></tr><tr><td class=m>2402020317</td><td>가금사육 생산관리</td><td class=n>45</td><td class=n>45</td><td class=n>22</td><td class=n>3</td><td>기준값(편성기준)</td><td>시간부족</td><td>추정(이수증명 필요)</td></tr><tr><td class=m>2402020303</td><td>가금 사료관리</td><td class=n>20</td><td class=n>20</td><td class=n>10</td><td class=n>4</td><td>기준값(편성기준)</td><td>시간부족</td><td>추정(이수증명 필요)</td></tr><tr><td class=m>2402020307</td><td>가금 분뇨처리</td><td class=n>20</td><td class=n>20</td><td class=n>10</td><td class=n>5</td><td>기준값(편성기준)</td><td>시간부족</td><td>추정(이수증명 필요)</td></tr>
+  </tbody></table></div></details>
+</section><section class="card">
+ <header class="ch">
+   <div class="tag">③  부분인정형</div>
+   <h2>전산회계운용사1급 <span class="arw">→</span> 세무·회계정보관리_L3</h2>
+   <p class="sub">경영·회계·사무 · 보유 기타(총 720h, 필수 360h) · 목표 필수능력단위 6개 / 300시간</p>
+ </header>
+ <div class="kpis">
+   <div class="kpi"><span>능력단위 커버리지</span><b>83<i>%</i></b>
+     <em>5/6개 단위가 겹침</em></div>
+   <div class="kpi hl"><span>인정 시간 — 확정</span><b>13<i>%</i></b>
+     <em>40h / 300h · 시간까지 충족</em></div>
+   <div class="kpi hl"><span>인정 시간 — 조정 적용 시</span><b>67<i>%</i></b>
+     <em>200h / 300h · −50% 조항 적용</em></div>
+   <div class="kpi"><span>추가 훈련·확인 필요</span><b>100<i>시간</i></b>
+     <em>부족 40h + 미이수 60h</em></div>
+ </div>
+ <div class="stackwrap"><div class="stack"><div class="sg good" style="width:13.333%" title="충족 40시간"></div><div class="sg warn" style="width:53.333%" title="조정범위 160시간"></div><div class="sg crit" style="width:13.333%" title="시간부족 40시간"></div><div class="sg none" style="width:20.000%" title="미이수 60시간"></div></div><div class="slab"><span class="good">충족 40h</span> · <span class="warn">조정범위 160h</span> · <span class="crit">시간부족 40h</span> · <span class="none">미이수 60h</span></div></div>
+ <div class="plot"><div class="row" title="원가계산
+요구 60h · 하한 30h
+이수 45h (기준값(편성기준))
+판정 조정범위내 / 추정(하한도 조정범위내)">
+  <div class="nm"><span class="code">0203020103</span>원가계산</div>
+  <div class="track">
+    <div class="fill warn" style="width:75.00%"></div>
+    <div class="minl" style="left:50.00%"></div>
+    <div class="reql" style="left:100.00%"><span class="reqv">60h</span></div>
+  </div>
+  <div class="hrs"><b>45</b><span>/60h</span></div>
+  <div class="st warn"><i>▲</i>조정범위</div>
+</div>
+<div class="row" title="세무조정 준비
+요구 60h · 하한 30h
+이수 -h (미이수)
+판정 미이수 / 해당없음">
+  <div class="nm"><span class="code">0203020213</span>세무조정 준비</div>
+  <div class="track">
+    <div class="fill none" style="width:0.00%"></div>
+    <div class="minl" style="left:50.00%"></div>
+    <div class="reql" style="left:100.00%"><span class="reqv">60h</span></div>
+  </div>
+  <div class="hrs"><b>–</b><span>/60h</span></div>
+  <div class="st none"><i>○</i>미이수</div>
+</div>
+<div class="row" title="원천징수
+요구 50h · 하한 25h
+이수 45h (기준값(편성기준))
+판정 조정범위내 / 추정(하한도 조정범위내)">
+  <div class="nm"><span class="code">0203020204</span>원천징수</div>
+  <div class="track">
+    <div class="fill warn" style="width:75.00%"></div>
+    <div class="minl" style="left:41.67%"></div>
+    <div class="reql" style="left:83.33%"><span class="reqv">50h</span></div>
+  </div>
+  <div class="hrs"><b>45</b><span>/50h</span></div>
+  <div class="st warn"><i>▲</i>조정범위</div>
+</div>
+<div class="row" title="부가가치세 신고
+요구 50h · 하한 25h
+이수 45h (기준값(편성기준))
+판정 조정범위내 / 추정(하한도 조정범위내)">
+  <div class="nm"><span class="code">0203020205</span>부가가치세 신고</div>
+  <div class="track">
+    <div class="fill warn" style="width:75.00%"></div>
+    <div class="minl" style="left:41.67%"></div>
+    <div class="reql" style="left:83.33%"><span class="reqv">50h</span></div>
+  </div>
+  <div class="hrs"><b>45</b><span>/50h</span></div>
+  <div class="st warn"><i>▲</i>조정범위</div>
+</div>
+<div class="row" title="재무제표작성
+요구 40h · 하한 20h
+이수 45h (기준값(편성기준))
+판정 완전충족 / 추정(하한도 조정범위내)">
+  <div class="nm"><span class="code">0203020112</span>재무제표작성</div>
+  <div class="track">
+    <div class="fill good" style="width:75.00%"></div>
+    <div class="minl" style="left:33.33%"></div>
+    <div class="reql" style="left:66.67%"><span class="reqv">40h</span></div>
+  </div>
+  <div class="hrs"><b>45</b><span>/40h</span></div>
+  <div class="st good"><i>●</i>충족</div>
+</div>
+<div class="row" title="적격증빙관리
+요구 40h · 하한 20h
+이수 15h (기준값(편성기준))
+판정 시간부족 / 추정(이수증명 필요)">
+  <div class="nm"><span class="code">0203020201</span>적격증빙관리</div>
+  <div class="track">
+    <div class="fill crit" style="width:25.00%"></div>
+    <div class="minl" style="left:33.33%"></div>
+    <div class="reql" style="left:66.67%"><span class="reqv">40h</span></div>
+  </div>
+  <div class="hrs"><b>15</b><span>/40h</span></div>
+  <div class="st crit"><i>■</i>시간부족</div>
+</div></div>
+ <details class="tbl"><summary>데이터 표로 보기</summary>
+  <div class="tw"><table><thead><tr><th>능력단위코드</th><th>능력단위명</th><th>NCS표준</th><th>요구시간</th><th>하한(−50%)</th><th>이수시간</th><th>근거</th><th>판정</th><th>신뢰도</th></tr></thead><tbody>
+  <tr><td class=m>0203020103</td><td>원가계산</td><td class=n>40</td><td class=n>60</td><td class=n>30</td><td class=n>45</td><td>기준값(편성기준)</td><td>조정범위내</td><td>추정(하한도 조정범위내)</td></tr><tr><td class=m>0203020213</td><td>세무조정 준비</td><td class=n>30</td><td class=n>60</td><td class=n>30</td><td class=n>–</td><td>–</td><td>미이수</td><td>해당없음</td></tr><tr><td class=m>0203020204</td><td>원천징수</td><td class=n>40</td><td class=n>50</td><td class=n>25</td><td class=n>45</td><td>기준값(편성기준)</td><td>조정범위내</td><td>추정(하한도 조정범위내)</td></tr><tr><td class=m>0203020205</td><td>부가가치세 신고</td><td class=n>40</td><td class=n>50</td><td class=n>25</td><td class=n>45</td><td>기준값(편성기준)</td><td>조정범위내</td><td>추정(하한도 조정범위내)</td></tr><tr><td class=m>0203020112</td><td>재무제표작성</td><td class=n>60</td><td class=n>40</td><td class=n>20</td><td class=n>45</td><td>기준값(편성기준)</td><td>완전충족</td><td>추정(하한도 조정범위내)</td></tr><tr><td class=m>0203020201</td><td>적격증빙관리</td><td class=n>40</td><td class=n>40</td><td class=n>20</td><td class=n>15</td><td>기준값(편성기준)</td><td>시간부족</td><td>추정(이수증명 필요)</td></tr>
+  </tbody></table></div></details>
+</section><section class="card">
+ <header class="ch">
+   <div class="tag">④  혼합형</div>
+   <h2>용접기사 <span class="arw">→</span> 수동용접(CO2용접)_L4</h2>
+   <p class="sub">재료 · 보유 기사(총 800h, 필수 540h) · 목표 필수능력단위 10개 / 410시간</p>
+ </header>
+ <div class="kpis">
+   <div class="kpi"><span>능력단위 커버리지</span><b>90<i>%</i></b>
+     <em>9/10개 단위가 겹침</em></div>
+   <div class="kpi hl"><span>인정 시간 — 확정</span><b>17<i>%</i></b>
+     <em>70h / 410h · 시간까지 충족</em></div>
+   <div class="kpi hl"><span>인정 시간 — 조정 적용 시</span><b>76<i>%</i></b>
+     <em>310h / 410h · −50% 조항 적용</em></div>
+   <div class="kpi"><span>추가 훈련·확인 필요</span><b>100<i>시간</i></b>
+     <em>부족 70h + 미이수 30h</em></div>
+ </div>
+ <div class="stackwrap"><div class="stack"><div class="sg good" style="width:17.073%" title="충족 70시간"></div><div class="sg warn" style="width:58.537%" title="조정범위 240시간"></div><div class="sg crit" style="width:17.073%" title="시간부족 70시간"></div><div class="sg none" style="width:7.317%" title="미이수 30시간"></div></div><div class="slab"><span class="good">충족 70h</span> · <span class="warn">조정범위 240h</span> · <span class="crit">시간부족 70h</span> · <span class="none">미이수 30h</span></div></div>
+ <div class="plot"><div class="row" title="피복아크용접 맞대기용접
+요구 70h · 하한 35h
+이수 30h (기준값(편성기준))
+판정 시간부족 / 추정(이수증명 필요)">
+  <div class="nm"><span class="code">1601050111</span>피복아크용접 맞대기용접</div>
+  <div class="track">
+    <div class="fill crit" style="width:40.00%"></div>
+    <div class="minl" style="left:46.67%"></div>
+    <div class="reql" style="left:93.33%"><span class="reqv">70h</span></div>
+  </div>
+  <div class="hrs"><b>30</b><span>/70h</span></div>
+  <div class="st crit"><i>■</i>시간부족</div>
+</div>
+<div class="row" title="피복아크용접 파이프용접
+요구 70h · 하한 35h
+이수 75h (기준값(편성기준))
+판정 완전충족 / 추정(하한도 조정범위내)">
+  <div class="nm"><span class="code">1601050113</span>피복아크용접 파이프용접</div>
+  <div class="track">
+    <div class="fill good" style="width:100.00%"></div>
+    <div class="minl" style="left:46.67%"></div>
+    <div class="reql" style="left:93.33%"><span class="reqv">70h</span></div>
+  </div>
+  <div class="hrs"><b>75</b><span>/70h</span></div>
+  <div class="st good"><i>●</i>충족</div>
+</div>
+<div class="row" title="솔리드와이어 맞대기 용접
+요구 70h · 하한 35h
+이수 45h (기준값(편성기준))
+판정 조정범위내 / 추정(하한도 조정범위내)">
+  <div class="nm"><span class="code">1601050213</span>솔리드와이어 맞대기 용접</div>
+  <div class="track">
+    <div class="fill warn" style="width:60.00%"></div>
+    <div class="minl" style="left:46.67%"></div>
+    <div class="reql" style="left:93.33%"><span class="reqv">70h</span></div>
+  </div>
+  <div class="hrs"><b>45</b><span>/70h</span></div>
+  <div class="st warn"><i>▲</i>조정범위</div>
+</div>
+<div class="row" title="플럭스코어드와이어 맞대기 용접
+요구 70h · 하한 35h
+이수 45h (기준값(편성기준))
+판정 조정범위내 / 추정(하한도 조정범위내)">
+  <div class="nm"><span class="code">1601050216</span>플럭스코어드와이어 맞대기 용접</div>
+  <div class="track">
+    <div class="fill warn" style="width:60.00%"></div>
+    <div class="minl" style="left:46.67%"></div>
+    <div class="reql" style="left:93.33%"><span class="reqv">70h</span></div>
+  </div>
+  <div class="hrs"><b>45</b><span>/70h</span></div>
+  <div class="st warn"><i>▲</i>조정범위</div>
+</div>
+<div class="row" title="CO₂용접 도면 해독
+요구 30h · 하한 15h
+이수 -h (미이수)
+판정 미이수 / 해당없음">
+  <div class="nm"><span class="code">1601050202</span>CO₂용접 도면 해독</div>
+  <div class="track">
+    <div class="fill none" style="width:0.00%"></div>
+    <div class="minl" style="left:20.00%"></div>
+    <div class="reql" style="left:40.00%"><span class="reqv">30h</span></div>
+  </div>
+  <div class="hrs"><b>–</b><span>/30h</span></div>
+  <div class="st none"><i>○</i>미이수</div>
+</div>
+<div class="row" title="피복아크용접 가용접 작업
+요구 20h · 하한 10h
+이수 15h (기준값(편성기준))
+판정 조정범위내 / 추정(하한도 조정범위내)">
+  <div class="nm"><span class="code">1601050105</span>피복아크용접 가용접 작업</div>
+  <div class="track">
+    <div class="fill warn" style="width:20.00%"></div>
+    <div class="minl" style="left:13.33%"></div>
+    <div class="reql" style="left:26.67%"><span class="reqv">20h</span></div>
+  </div>
+  <div class="hrs"><b>15</b><span>/20h</span></div>
+  <div class="st warn"><i>▲</i>조정범위</div>
+</div>
+<div class="row" title="피복아크용접부 검사
+요구 20h · 하한 10h
+이수 15h (기준값(편성기준))
+판정 조정범위내 / 추정(하한도 조정범위내)">
+  <div class="nm"><span class="code">1601050107</span>피복아크용접부 검사</div>
+  <div class="track">
+    <div class="fill warn" style="width:20.00%"></div>
+    <div class="minl" style="left:13.33%"></div>
+    <div class="reql" style="left:26.67%"><span class="reqv">20h</span></div>
+  </div>
+  <div class="hrs"><b>15</b><span>/20h</span></div>
+  <div class="st warn"><i>▲</i>조정범위</div>
+</div>
+<div class="row" title="피복아크용접 결함부 보수용접 작업
+요구 20h · 하한 10h
+이수 15h (기준값(편성기준))
+판정 조정범위내 / 추정(하한도 조정범위내)">
+  <div class="nm"><span class="code">1601050108</span>피복아크용접 결함부 보수용접 작업</div>
+  <div class="track">
+    <div class="fill warn" style="width:20.00%"></div>
+    <div class="minl" style="left:13.33%"></div>
+    <div class="reql" style="left:26.67%"><span class="reqv">20h</span></div>
+  </div>
+  <div class="hrs"><b>15</b><span>/20h</span></div>
+  <div class="st warn"><i>▲</i>조정범위</div>
+</div>
+<div class="row" title="CO₂용접 용접부 검사
+요구 20h · 하한 10h
+이수 15h (기준값(편성기준))
+판정 조정범위내 / 추정(하한도 조정범위내)">
+  <div class="nm"><span class="code">1601050208</span>CO₂용접 용접부 검사</div>
+  <div class="track">
+    <div class="fill warn" style="width:20.00%"></div>
+    <div class="minl" style="left:13.33%"></div>
+    <div class="reql" style="left:26.67%"><span class="reqv">20h</span></div>
+  </div>
+  <div class="hrs"><b>15</b><span>/20h</span></div>
+  <div class="st warn"><i>▲</i>조정범위</div>
+</div>
+<div class="row" title="CO₂용접 결함부 보수 용접 작업
+요구 20h · 하한 10h
+이수 15h (기준값(편성기준))
+판정 조정범위내 / 추정(하한도 조정범위내)">
+  <div class="nm"><span class="code">1601050209</span>CO₂용접 결함부 보수 용접 작업</div>
+  <div class="track">
+    <div class="fill warn" style="width:20.00%"></div>
+    <div class="minl" style="left:13.33%"></div>
+    <div class="reql" style="left:26.67%"><span class="reqv">20h</span></div>
+  </div>
+  <div class="hrs"><b>15</b><span>/20h</span></div>
+  <div class="st warn"><i>▲</i>조정범위</div>
+</div></div>
+ <details class="tbl"><summary>데이터 표로 보기</summary>
+  <div class="tw"><table><thead><tr><th>능력단위코드</th><th>능력단위명</th><th>NCS표준</th><th>요구시간</th><th>하한(−50%)</th><th>이수시간</th><th>근거</th><th>판정</th><th>신뢰도</th></tr></thead><tbody>
+  <tr><td class=m>1601050111</td><td>피복아크용접 맞대기용접</td><td class=n>70</td><td class=n>70</td><td class=n>35</td><td class=n>30</td><td>기준값(편성기준)</td><td>시간부족</td><td>추정(이수증명 필요)</td></tr><tr><td class=m>1601050113</td><td>피복아크용접 파이프용접</td><td class=n>70</td><td class=n>70</td><td class=n>35</td><td class=n>75</td><td>기준값(편성기준)</td><td>완전충족</td><td>추정(하한도 조정범위내)</td></tr><tr><td class=m>1601050213</td><td>솔리드와이어 맞대기 용접</td><td class=n>70</td><td class=n>70</td><td class=n>35</td><td class=n>45</td><td>기준값(편성기준)</td><td>조정범위내</td><td>추정(하한도 조정범위내)</td></tr><tr><td class=m>1601050216</td><td>플럭스코어드와이어 맞대기 용접</td><td class=n>70</td><td class=n>70</td><td class=n>35</td><td class=n>45</td><td>기준값(편성기준)</td><td>조정범위내</td><td>추정(하한도 조정범위내)</td></tr><tr><td class=m>1601050202</td><td>CO₂용접 도면 해독</td><td class=n>30</td><td class=n>30</td><td class=n>15</td><td class=n>–</td><td>–</td><td>미이수</td><td>해당없음</td></tr><tr><td class=m>1601050105</td><td>피복아크용접 가용접 작업</td><td class=n>20</td><td class=n>20</td><td class=n>10</td><td class=n>15</td><td>기준값(편성기준)</td><td>조정범위내</td><td>추정(하한도 조정범위내)</td></tr><tr><td class=m>1601050107</td><td>피복아크용접부 검사</td><td class=n>20</td><td class=n>20</td><td class=n>10</td><td class=n>15</td><td>기준값(편성기준)</td><td>조정범위내</td><td>추정(하한도 조정범위내)</td></tr><tr><td class=m>1601050108</td><td>피복아크용접 결함부 보수용접 작업</td><td class=n>20</td><td class=n>20</td><td class=n>10</td><td class=n>15</td><td>기준값(편성기준)</td><td>조정범위내</td><td>추정(하한도 조정범위내)</td></tr><tr><td class=m>1601050208</td><td>CO₂용접 용접부 검사</td><td class=n>20</td><td class=n>20</td><td class=n>10</td><td class=n>15</td><td>기준값(편성기준)</td><td>조정범위내</td><td>추정(하한도 조정범위내)</td></tr><tr><td class=m>1601050209</td><td>CO₂용접 결함부 보수 용접 작업</td><td class=n>20</td><td class=n>20</td><td class=n>10</td><td class=n>15</td><td>기준값(편성기준)</td><td>조정범위내</td><td>추정(하한도 조정범위내)</td></tr>
+  </tbody></table></div></details>
+</section>
+
+<footer>
+생성 2026-08-20 · 원천 <code>derived/krpl.sqlite</code> (일학습병행 종목 454 · 과정평가형 자격 216 · NCS 능력단위 13,296)<br>
+판정식 — 충족: 이수≥요구 / 조정범위: 이수≥요구×0.5 / 시간부족: 이수&lt;요구×0.5 / 미이수: 해당 능력단위 없음.
+과정평가형 이수시간은 기관이 80~150% 범위에서 편성 가능하므로 실제 심사에서는 개인 이수증명서 값으로 대체해야 합니다.
+</footer>
+</div>
+</body>
+</html>

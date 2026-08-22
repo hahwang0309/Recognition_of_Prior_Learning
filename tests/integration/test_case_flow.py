@@ -148,7 +148,7 @@ def test_overview_links_to_both_reports(client, sid):
 
 def test_both_reports_render(client, sid):
     t = client.get(f"/submissions/{sid}/report/time")
-    assert t.status_code == 200 and "시간 대조 보고서" in t.text
+    assert t.status_code == 200 and "RPL Track A 심사 보고서" in t.text
     ev = client.get(f"/submissions/{sid}/report/evidence")
     with session_scope() as s:
         st = case_state(s, sid)
@@ -185,14 +185,16 @@ def test_reports_use_names_not_codes(client, sid):
 
 
 def test_reports_avoid_internal_jargon(client, sid):
+    """Track A·B 는 연구팀 확정 포맷의 제목이므로 그대로 둔다.
+    걸러야 할 것은 코드 안쪽 이름(payload 키·함수명)이 화면에 새는 것이다."""
     for path in ("/report/time", "/report/evidence"):
         r = client.get(f"/submissions/{sid}{path}")
         if r.status_code == 404:
             continue
         h = r.text
-        for bad in ("Track A", "Track B", "track_a", "track_b", "needs_expert_review",
-                    "decided_by", "uncovered_ksa", "HILM"):
-            assert bad not in h, f"{path} 에 내부 용어 노출: {bad}"
+        for bad in ("track_a", "track_b", "needs_expert_review", "decided_by",
+                    "uncovered_ksa", "qualitative_note", "HILM", "submission_id"):
+            assert bad not in h, f"{path} 에 내부 이름 노출: {bad}"
 
 
 def test_decision_words_carry_their_meaning(client):
