@@ -63,10 +63,11 @@ footer{color:var(--tm);font-size:11.5px;border-top:1px solid var(--bd);padding-t
 @media(max-width:680px){.art{grid-template-columns:1fr;gap:3px}}"""
 
 
-def _head(title: str) -> str:
-    return (f'<!doctype html><html lang="ko"><head><meta charset="utf-8">'
-            f'<meta name="viewport" content="width=device-width, initial-scale=1">'
-            f'<title>{e(title)}</title><style>{CSS}</style></head><body><div class="wrap">')
+def _head(title: str, here: str = "/audit") -> str:
+    """공통 껍데기를 쓴다. 예전에는 자체 <head> 라서 머리말 차림표가 없었고,
+    차림표에 실려 있는 「감사」·「운영 통계」를 누르는 순간 차림표가 사라졌다."""
+    from services.report.layout import page_open
+    return page_open(title, css=CSS, here=here)
 
 
 def _kb(n: int) -> str:
@@ -332,7 +333,7 @@ def render_stats(s: Session) -> str:
     jrow = "".join(f'<tr><td>{e(j["kind"])}</td><td>{e(j["status"])}</td>'
                    f'<td class="n">{j["n"]}</td></tr>' for j in jobs)
     cost = float(a["cost"] or 0)
-    return _head("운영 통계") + f"""
+    return _head("운영 통계", "/stats") + f"""
 <div class="nav"><a href="/audit">← 감사 목록</a></div>
 <h1>운영 통계</h1><p class="sub">지금까지 처리된 것의 집계입니다.</p>
 <div class="kpis">

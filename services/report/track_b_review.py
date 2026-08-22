@@ -370,10 +370,11 @@ def render_review(s: Session, assessment_id: int) -> str:
     fd_line = (f'기록됨 — {e(fd["decision"])} · {fd["recognized_hours"]}시간 '
                f'· {e(fd["decided_by"])}' if fd else "아직 기록 전")
 
-    return f"""<!doctype html><html lang="ko"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>선행학습인정 검토 — {e(a['case_number'])}</title><style>{CSS}</style></head>
-<body><div class="wrap">
+    from services.report.layout import page_open
+    return page_open(f"선행학습인정 검토 — {a['case_number']}", css=CSS, here="/cases") + f"""
+<div style="font-size:12.5px;margin-bottom:12px">
+ <a href="/cases">← 접수 현황</a> · <a href="/audit/{e(a['case_number'])}">이 건의 감사 기록</a>
+</div>
 <h1>선행학습인정 검토</h1>
 <p class="sub">심사번호 {e(a['case_number'])} ·
  {e(a['official_name'] or a['target_program_id'])} · 총 필수 {sm.total_hours}시간 ·

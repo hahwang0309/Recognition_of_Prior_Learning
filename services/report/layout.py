@@ -94,11 +94,24 @@ footer{color:var(--tm);font-size:11.5px;border-top:1px solid var(--bd);padding-t
 @media(max-width:680px){.row.two,.row.three{grid-template-columns:1fr}}"""
 
 
-def page(title: str, body: str, *, css: str = "", here: str = "",
-         env: str = "", scripts: str = "") -> str:
-    """한 화면. body 는 .wrap 안에 들어간다."""
+def page_open(title: str, *, css: str = "", here: str = "", env: str = "") -> str:
+    """화면 껍데기의 여는 쪽 — `<div class="wrap">` 까지.
+
+    화면마다 자기 `<!doctype>` 를 따로 쓰면 머리말 차림표가 빠진다.
+    실제로 7개 중 4개가 그랬고, 그중 둘(`/audit`·`/stats`)은 차림표에 실려 있으면서도
+    누르는 순간 차림표가 사라졌다. 검토 화면은 사람이 가장 오래 머무는 곳이었다.
+
+    파일 고유 CSS(`css`)는 BASE **뒤에** 붙는다. 같은 이름의 규칙이 있으면
+    파일 것이 이기므로 기존 모양이 바뀌지 않는다.
+    """
     nav = "".join(f'<a href="{p}"{" class=on" if p == here else ""}>{e(n)}</a>'
                   for p, n in NAV)
+    if not env:
+        try:
+            from krpl_core.config import get_rubric, get_settings
+            env = env_label(get_settings(), get_rubric())
+        except Exception:                                   # noqa: BLE001
+            env = ""
     return f"""<!doctype html><html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{e(title)}</title><style>{BASE}
@@ -108,8 +121,14 @@ def page(title: str, body: str, *, css: str = "", here: str = "",
   <nav>{nav}</nav>
   <span class="env">{e(env)}</span>
 </div></div>
-<div class="wrap">{body}</div>
-{scripts}</body></html>"""
+<div class="wrap">"""
+
+
+def page(title: str, body: str, *, css: str = "", here: str = "",
+         env: str = "", scripts: str = "") -> str:
+    """한 화면. body 는 .wrap 안에 들어간다."""
+    return (page_open(title, css=css, here=here, env=env)
+            + body + f"</div>\n{scripts}</body></html>")
 
 
 def env_label(settings, rubric) -> str:
