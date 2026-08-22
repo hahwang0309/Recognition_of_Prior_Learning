@@ -72,6 +72,49 @@ def eligible_units(package: dict, rubric) -> dict[str, PriorCredit]:
     return out
 
 
+@dataclass(frozen=True)
+class RejectedCredit:
+    """이수 기록으로 잡히긴 했으나 시간 갈음에 쓸 수 없는 능력단위."""
+    unit_code: str
+    unit_name: str
+    required_hours: int
+    completed_hours: int | None
+    reason: str
+    doc_type: str
+
+
+def rejected_units(package: dict, rubric) -> list[RejectedCredit]:
+    """왜 갈음되지 않았는지를 남긴다.
+
+    보고서가 「0시간」만 보여 주면 심사위원은 서류를 안 낸 것인지, 냈는데
+    안 쳐 준 것인지 구분할 수 없다. 실제로 이 둘은 처리가 다르다 —
+    편성표만 낸 사람에게는 이수증을 받으면 되고, 아예 없는 사람은 근거 분석으로 간다.
+    """
+    spec = rubric.recommendations["R0"]
+    need_eval = spec["requires"].get("evaluation_passed", True)
+    floor = spec["downgrade_if"]["completed_hours_ratio_below"]
+
+    hours = {u["unit_code"]: u for u in package["ncs"]["units"]}
+    out: list[RejectedCredit] = []
+    for pl in package.get("prior_learning") or []:
+        u = hours.get(pl["unit_code"])
+        if u is None:
+            continue                       # 목표 종목과 무관 — 굳이 보고할 것이 없다
+        done = pl.get("completed_hours")
+        req = u["required_hours"] or 0
+        if need_eval and not pl.get("evaluated"):
+            reason = ("이수시간과 평가결과가 적혀 있지 않습니다"
+                      if done is None else "내부평가 합격이 확인되지 않습니다")
+        elif req and (done or 0) / req < floor:
+            reason = f"이수 {done}시간으로 요구 {req}시간의 {floor:.0%}에 못 미칩니다"
+        else:
+            continue                       # 통과한 것 — eligible_units 가 가져간다
+        out.append(RejectedCredit(
+            unit_code=pl["unit_code"], unit_name=u["unit_name"], required_hours=req,
+            completed_hours=done, reason=reason, doc_type=pl.get("doc_type") or ""))
+    return out
+
+
 def _fragment(package: dict, fid: str) -> dict | None:
     return next((f for f in package["fragments"] if f["fid"] == fid), None)
 

@@ -353,9 +353,9 @@ def run_track_b(s: Session, submission_id: int, *,
     from krpl_core.db import session_scope as _scope
     with _scope() as s0:
         aid = s0.execute(text("""
-            INSERT INTO assessment (submission_id, status, rubric_version, prompt_version,
+            INSERT INTO assessment (submission_id, kind, status, rubric_version, prompt_version,
                                     model, effort, input_hash, attempts, started_at)
-            VALUES (:s, 'running', :rv, :pv, :m, :ef, :h, 0, :t) RETURNING id"""),
+            VALUES (:s, 'evidence', 'running', :rv, :pv, :m, :ef, :h, 0, :t) RETURNING id"""),
             {"s": submission_id, "rv": rb.version, "pv": pv, "m": profile.model,
              "ef": profile.effort, "h": package_hash(pkg), "t": now}).scalar_one()
         s0.execute(text("UPDATE submission SET status='assessing' WHERE id=:i"),

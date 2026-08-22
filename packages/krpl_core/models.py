@@ -184,6 +184,9 @@ class Assessment(Base):
     __tablename__ = "assessment"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     submission_id: Mapped[int] = mapped_column(ForeignKey("submission.id", ondelete="CASCADE"), index=True)
+    # 어떤 판정인가 — time(시간 대조·결정론) / evidence(근거 분석·AI).
+    # 한 접수에 둘 다 있을 수 있고, 화면은 이 값으로 갈라진다.
+    kind: Mapped[str] = mapped_column(String(10), server_default="evidence", index=True)
     status: Mapped[str] = mapped_column(String(20), server_default="queued", index=True)
     rubric_version: Mapped[str] = mapped_column(String(10))
     prompt_version: Mapped[str | None] = mapped_column(String(40))
