@@ -155,9 +155,12 @@ def test_both_reports_render(client, sid):
     if not st.evidence_done:
         assert ev.status_code == 404          # 아직 안 돌았다
         return
-    assert ev.status_code == 200 and "근거 분석 보고서" in ev.text
+    assert ev.status_code == 200 and "RPL Track B 심사 보고서" in ev.text
+    # 연구팀 확정 포맷의 세 장이 모두 있어야 한다
+    for chap in ("Ⅰ. 히트맵", "Ⅱ. 보완계획", "Ⅲ. 능력단위요소별 판정 근거"):
+        assert chap in ev.text, f"확정 포맷의 「{chap}」 이 빠졌다"
     # 보고서에서 검토로 가는 길이 있어야 한다 — 읽고 나서 판단한다
-    assert "검토하기" in ev.text
+    assert "전문가 검토로" in ev.text
 
 
 def test_reports_agree_on_hours(client, sid):
