@@ -88,7 +88,8 @@ details.grp>summary .st.ok{background:var(--ok);color:#fff}
 .el .hd .tw{color:var(--tm);font-size:10px;transition:transform .12s;
  position:absolute;margin-left:-16px}
 .el.open .hd .tw{transform:rotate(90deg)}
-.el .en{font-weight:600;flex:1;min-width:150px}
+.el .en{font-weight:600;min-width:120px}
+.el .un{flex:1;min-width:110px;font-size:11.5px;color:var(--tm)}
 .el .cnt{font-size:11.3px;color:var(--tm);white-space:nowrap}
 .el .mks{display:flex;gap:4px;flex-wrap:wrap}
 .mk{font-size:10.8px;padding:1px 7px;border-radius:9px;background:var(--s3);color:var(--ts)}
@@ -166,7 +167,9 @@ def _evidence(ev: list[dict], frags: dict[str, str]) -> str:
     return out
 
 
-def _element(x: dict, frags: dict[str, str], rv: dict, names: dict[str, str]) -> str:
+def _element(x: dict, frags: dict[str, str], rv: dict, names: dict[str, str],
+             units: dict[str, str] | None = None) -> str:
+    units = units or {}
     p = x["payload"]
     cls, label, hint = REC.get(x["recommendation"], ("r5", x["recommendation"], ""))
     flag = ('<span class="flag">전문가 확인 필요</span>'
@@ -232,6 +235,9 @@ def _element(x: dict, frags: dict[str, str], rv: dict, names: dict[str, str]) ->
         f'onclick="mark(this,\'{e(eid)}\')">{d}</button>'
         for d in ("인정", "조건부인정", "불인정", "보류"))
     name = names.get(eid) or p.get("element_name") or eid
+    # 요소 이름만으로는 구분이 안 된다 — 「용접 전 검사하기」가 세 능력단위에 있다.
+    # 접힌 줄에서 어느 능력단위인지 보이지 않으면 접어 둔 의미가 없다.
+    unit = p.get("unit_name") or units.get(eid.split("_", 1)[0]) or ""
 
     # 눈여겨볼 것 — 이 표시가 있으면 펼쳐 보시라는 뜻이다
     marks = ""
@@ -250,6 +256,7 @@ def _element(x: dict, frags: dict[str, str], rv: dict, names: dict[str, str]) ->
  <span class="tw">▸</span>
  <span class="tag" style="background:var(--{cls});color:var(--{cls}-fg)">{e(x['recommendation'])}</span>
  <span class="en">{e(name)}</span>
+ <span class="un">{e(unit)}</span>
  <span class="mks">{marks}</span>
  <span class="cnt">근거 {n_ev}{f' · 빈 항목 {n_un}' if n_un else ''}</span>
  {flag}
@@ -293,6 +300,7 @@ def render_review(s: Session, assessment_id: int) -> str:
                    {"i": a["sid"]}).mappings().first()
 
     sm = review_summary(s, assessment_id)
+    unit_names = {u.unit_code: u.unit_name for u in sm.units}
     note = json.loads(a["overall_note"]) if a["overall_note"] else {}
 
     # 능력단위 순서가 아니라 **손이 가는 정도**로 묶는다.
@@ -336,7 +344,7 @@ def render_review(s: Session, assessment_id: int) -> str:
             f'<button class="sm" data-d="{d}" onclick="bulk(this)">'
             f'{d} {len(items)}개</button>'
             for d in (("인정",) if key == "rule" else ("인정", "조건부인정")))
-        cards = "".join(_element(x, frags, rv, names) for x in
+        cards = "".join(_element(x, frags, rv, names, unit_names) for x in
                         sorted(items, key=lambda y: (y["recommendation"], y["element_id"])))
         secs += f'''<details class="grp" {"open" if open_ else ""} data-k="{key}">
  <summary><span class="st {badge}">{e(title)}</span>
