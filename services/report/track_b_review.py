@@ -56,7 +56,6 @@ h1{font-size:23px;margin:0 0 4px}.sub{color:var(--tm);font-size:12.5px;margin:0 
 .dot{width:9px;height:9px;border-radius:50%;flex:none}
 h2{font-size:15.5px;margin:26px 0 3px;display:flex;align-items:baseline;gap:9px}
 h2 small{font-weight:400;font-size:12px;color:var(--tm)}
-.uhrs{font-size:12px;color:var(--tm);margin:0 0 10px}
 details.grp{border:1px solid var(--bd);border-radius:11px;background:var(--s1);
  margin-bottom:12px;overflow:hidden}
 details.grp>summary{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
@@ -66,6 +65,18 @@ details.grp>summary::before{content:"▸";color:var(--tm);font-size:11px;
  transition:transform .12s}
 details.grp[open]>summary::before{transform:rotate(90deg)}
 details.grp>summary b{font-variant-numeric:tabular-nums}
+/* 묶음 머리의 상태 배지·버튼. 이 파일에는 .st 와 .sm 이 없어서
+   「먼저 보실 것」 같은 분류 표시가 스타일 없는 맨 글자로 나오고,
+   일괄 처리 버튼은 브라우저 기본 회색 버튼으로 떨어졌다.
+   분류 표시는 이 화면에서 어디부터 볼지 알려 주는 유일한 신호다. */
+details.grp>summary .st{display:inline-block;font-size:11.5px;font-weight:600;
+ padding:2px 10px;border-radius:11px;background:var(--s3);color:var(--ts)}
+details.grp>summary .st.no{background:var(--no);color:#fff}
+details.grp>summary .st.wn{background:var(--wn);color:#3a2a00}
+details.grp>summary .st.ok{background:var(--ok);color:#fff}
+.gb button.sm{font:inherit;font-size:12px;padding:4px 12px;border-radius:7px;cursor:pointer;
+ border:1px solid var(--bd);background:var(--s1);color:var(--ts)}
+.gb button.sm:hover{border-color:var(--tm);background:var(--s3)}
 .pg{font-size:11.5px;color:var(--tm);font-variant-numeric:tabular-nums}
 .gh{flex:1 1 100%;font-size:11.8px;color:var(--tm);padding-left:18px}
 .gb{display:flex;gap:5px;margin-left:auto}
@@ -86,8 +97,7 @@ details.grp>summary b{font-variant-numeric:tabular-nums}
 .mk.rule{background:rgba(12,163,12,.13);color:var(--ok)}
 .el .dt{display:none;padding:2px 15px 14px 33px;border-top:1px dashed var(--bd)}
 .el.open .dt{display:block}
-.eh .en{font-weight:600;font-size:14px}
-.eh .ec{font-size:10.5px;color:var(--tm);font-variant-numeric:tabular-nums}
+.ec{font-size:10.5px;color:var(--tm);font-variant-numeric:tabular-nums}
 .tag{font-size:11.3px;padding:1.5px 8px;border-radius:11px;white-space:nowrap;font-weight:600}
 .flag{font-size:11.3px;padding:1.5px 8px;border-radius:11px;border:1px solid var(--warn);
  color:var(--warn);white-space:nowrap}
