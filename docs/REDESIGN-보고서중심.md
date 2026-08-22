@@ -129,6 +129,19 @@ R2026-0002 · 수동용접(CO2용접)_L4 · 총 필수 410시간
 `config/rubric/v0.2.yaml` 의 `final_decision.element_decision_meanings`
 에 두어 간담회에서 함께 볼 수 있게 했다.
 
+## 뒤이은 수정 (같은 날)
+
+**보고서 포맷은 연구팀이 이미 확정해 둔 것이 있었다.**
+`derived/trackA_보고서.html`·`trackB_보고서.html`. 내가 「현장 언어로」 다시
+쓰면서 Track A 는 KPI 4종과 카드 구조를, Track B 는 히트맵·보완계획·세 장
+구성을 통째로 잃었다. 원본을 `docs/formats/` 에 두고 CSS·클래스명·마크업·
+범례·아이콘을 그대로 옮겼다. `test_report_format.py` 32건이 원본 파일과
+구현을 나란히 대조한다.
+
+**검토로 넘길 것을 추린다.** 보고서는 다 싣되, 사람이 판단할 것만 검토로
+보낸다. 33개 중 15개는 훈련이수증으로 확정돼 판단할 여지가 없었다.
+선별 규칙은 `services/review/triage.py` 한 자리.
+
 ## 아직 안 한 것
 
 - 진행률 화면은 replay 로만 확인했다. 실제 AI 분석을 걸어 6~30분 도는
