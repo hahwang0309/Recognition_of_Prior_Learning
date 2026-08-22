@@ -27,12 +27,26 @@ CSS = """
 .grp{margin-bottom:26px}
 .grp h2{display:flex;align-items:baseline;gap:9px;margin:0 0 8px}
 .grp h2 small{font-weight:400;font-size:12px;color:var(--tm)}
-.act{display:flex;gap:6px;justify-content:flex-end}
+/* 표 칸 안에서 flex 를 쓰면 그 칸만 높이가 달라져 행 아래 선이 끊긴다.
+   선은 td 가 긋고, 정렬은 안쪽 상자가 맡게 나눈다. */
+td.act{text-align:right;white-space:nowrap}
+td.act>*{display:inline-flex;align-items:center;gap:6px}
 .bar{height:5px;border-radius:3px;background:var(--s3);overflow:hidden;min-width:70px}
+/* 행마다 하나뿐인 「다음 할 일」이다. 21px 짜리 배지로는 누르기 어렵다. */
+td.act .st{padding:6px 13px;font-size:12px;border-radius:7px}
+td.act button.sm{padding:6px 13px;font-size:12px}
 .bar i{display:block;height:100%;background:var(--ac)}
-.mini{font-size:11.3px;color:var(--tm);white-space:nowrap}
+.mini{font-size:11.5px;color:var(--tm);white-space:nowrap}
 .empty{color:var(--tm);font-size:12.8px;padding:14px 0}
-.worker{font-size:12.5px}
+/* 이 표는 6열인데 중단점이 없어 좁은 화면에서 가로로 넘쳤다.
+   좁아지면 카드처럼 쌓고, 각 칸 앞에 무엇인지 붙인다. */
+@media(max-width:760px){
+ .grp table,.grp tbody,.grp tr,.grp td{display:block;width:100%}
+ .grp tr{border:1px solid var(--bd);border-radius:9px;padding:10px 12px;
+  margin-bottom:8px;background:var(--s1)}
+ .grp td{border:0;padding:3px 0}
+ td.act{text-align:left;padding-top:9px}
+ td.act .st,td.act button.sm{display:inline-block;width:100%;text-align:center}}
 """
 
 
@@ -105,7 +119,7 @@ def render_dashboard(rows: list[dict], queue: dict, worker_ok: bool,
  <td>{prog}</td>
  <td>{fin}</td>
  <td class="n mini">{r['received_at']:%m-%d %H:%M}</td>
- <td class="act">{act}</td></tr>"""
+ <td class="act"><span>{act}</span></td></tr>"""
         anchor = label.replace(" ", "-")
         secs += f"""<div class="grp" id="{anchor}"><h2><span class="st {badge}">{e(label)}</span>
  <small>{len(items)}건</small></h2>
