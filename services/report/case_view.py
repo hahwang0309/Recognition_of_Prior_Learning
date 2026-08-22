@@ -147,8 +147,10 @@ def render_case(s: Session, submission_id: int) -> str | None:
                        report_link or '<a href="">새로 고침</a>', now=True, extra=bar)
     elif done:
         cost = f" · 비용 ${done.cost:.2f}" if done.cost else ""
-        warn = ('<em> 다시 돌린 분석이 실패했습니다 — 아래는 지난 결과입니다.</em>'
-                if ev and ev is not done and not ev.running else "")
+        # 두 Run 은 서로 다른 조회에서 왔으므로 같은 판정이라도 객체가 다르다.
+        # `is not` 로 비교했다가 실패한 적이 없는데도 실패했다고 적었다. id 로 본다.
+        warn = ('<em> 다시 돌린 분석이 끝나지 못했습니다 — 아래는 지난 결과입니다.</em>'
+                if ev and ev.id != done.id and not ev.running else "")
         steps += _step("②", "근거 분석", _st("완료", "ok"),
                        f"추가 자료 {len(st.extra_docs)}종에서 "
                        f"<b>{done.n_elements}개 항목</b>을 판단했습니다."

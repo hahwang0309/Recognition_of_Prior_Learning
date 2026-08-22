@@ -214,6 +214,46 @@ def test_decision_words_carry_their_meaning(client):
 
 # ── 근거 분석을 시작할 수 있는가 ──────────────────────────────────
 
+def test_no_false_failure_notice(client, sid):
+    """실패하지 않았는데 「끝나지 못했습니다」라고 적으면 안 된다.
+
+    evidence 와 evidence_done 은 서로 다른 조회에서 오므로 같은 판정이라도
+    객체가 다르다. `is not` 로 비교했더니 멀쩡한 건마다 실패 문구가 붙었다.
+    """
+    with session_scope() as s:
+        st = case_state(s, sid)
+        if not st.evidence_done:
+            pytest.skip("근거 분석 결과 없음")
+        stale = st.evidence is not None and st.evidence.id != st.evidence_done.id
+    h = client.get(f"/submissions/{sid}").text
+    if not stale:
+        assert "끝나지 못했습니다" not in h, "실패하지 않았는데 실패했다고 적혀 있다"
+
+
+def test_finished_report_survives_a_rerun(client, sid):
+    """새 분석이 도는 중이라도 이미 나온 보고서는 계속 열려야 한다."""
+    with session_scope() as s:
+        st = case_state(s, sid)
+        if not st.evidence_done:
+            pytest.skip("근거 분석 결과 없음")
+        aid = st.evidence_done.id
+        # 뒤이어 실행 하나가 도는 상황을 만든다
+        s.execute(text("""INSERT INTO assessment
+            (submission_id, kind, status, rubric_version, model, attempts, started_at)
+            VALUES (:i,'evidence','running','v0.2','test',0, now())"""), {"i": sid})
+    try:
+        with session_scope() as s:
+            st2 = case_state(s, sid)
+        assert st2.analyzing, "도는 중으로 잡혀야 한다"
+        assert st2.evidence_done and st2.evidence_done.id == aid, "지난 결과를 잃었다"
+        assert client.get(f"/submissions/{sid}/report/evidence").status_code == 200
+        assert f"/submissions/{sid}/report/evidence" in client.get(f"/submissions/{sid}").text
+    finally:
+        with session_scope() as s:
+            s.execute(text("""DELETE FROM assessment
+                WHERE submission_id=:i AND kind='evidence' AND model='test'"""), {"i": sid})
+
+
 def test_analysis_offered_only_when_there_is_material(sid):
     with session_scope() as s:
         st = case_state(s, sid)
