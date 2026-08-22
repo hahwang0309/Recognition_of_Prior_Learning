@@ -277,3 +277,25 @@ def test_analyze_redirects_back_to_the_overview(client, sid):
 def test_missing_case_is_404(client):
     assert client.get("/submissions/99999999").status_code == 404
     assert client.get("/submissions/99999999/report/time").status_code == 404
+
+
+def test_review_counts_only_what_needs_judgment(client, sid):
+    """보고서는 요소를 다 싣지만, 검토로 넘어가는 것은 그중 판단할 것뿐이다.
+
+    훈련이수증으로 확정된 항목까지 한 줄씩 누르게 하면 정작 따져야 할 것에
+    쓸 힘이 흩어진다. 개요와 검토 화면이 같은 수를 말해야 한다.
+    """
+    with session_scope() as s:
+        st = case_state(s, sid)
+        if not st.evidence_done:
+            pytest.skip("근거 분석 결과 없음")
+    assert st.n_judge + st.n_settled == st.n_elements
+    assert st.review_left == st.n_judge - st.judged
+
+    overview = client.get(f"/submissions/{sid}").text
+    review = client.get(f"/assessments/{st.evidence_done.id}/review").text
+    if st.n_settled:
+        # 두 화면이 같은 수를 말해야 한다
+        assert f"{st.n_settled}개" in overview
+        assert f"{st.n_settled}개" in review
+    assert f"{st.n_judge}개" in review

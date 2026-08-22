@@ -174,15 +174,19 @@ def render_case(s: Session, submission_id: int) -> str | None:
 
     # ── ③ 전문가 검토 ──────────────────────────────────────────────
     if done:
-        left = done.n_elements - st.n_reviewed
         if st.review_done:
             steps += _step("③", "전문가 검토", _st("완료", "ok"),
-                           f"{done.n_elements}개 항목을 모두 판단하셨습니다.",
+                           f"판단이 필요한 {st.n_judge}개 항목을 모두 정하셨습니다."
+                           + (f" 나머지 {st.n_settled}개는 이수 기록으로 확정된 것입니다."
+                              if st.n_settled else ""),
                            f'<a href="/assessments/{done.id}/review">다시 보기</a>')
         else:
+            settled = (f" 나머지 <b>{st.n_settled}개</b>는 이수 기록으로 확정돼 "
+                       f"확인만 하시면 됩니다." if st.n_settled else "")
             steps += _step("③", "전문가 검토",
-                           _st(f"{st.n_reviewed}/{done.n_elements}", "wn"),
-                           f"보고서를 읽으신 뒤 <b>{left}개 항목</b>에 가·부를 정해 주십시오.",
+                           _st(f"{st.judged}/{st.n_judge}", "wn"),
+                           f"보고서 {done.n_elements}개 항목 가운데 "
+                           f"<b>{st.review_left}개</b>가 판단 대상입니다.{settled}",
                            f'<a class="go" href="/assessments/{done.id}/review">검토하기</a>',
                            now=True)
     else:

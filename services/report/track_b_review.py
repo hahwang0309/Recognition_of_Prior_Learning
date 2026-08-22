@@ -17,7 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from krpl_core.config import get_rubric
-from services.review import review_summary
+from services.review import BUCKETS, SETTLED, review_summary, split
 
 e = lambda x: html.escape(str(x) if x is not None else "")   # noqa: E731
 
@@ -327,32 +327,9 @@ def render_review(s: Session, assessment_id: int) -> str:
 
     # 능력단위 순서가 아니라 **손이 가는 정도**로 묶는다.
     # 33개를 통째로 늘어놓으면 어디부터 볼지 알 수 없다.
-    def bucket(x):
-        """어디부터 보실지 가른다.
-
-        「부정 진술이 있음」만으로는 절반이 걸려 선별이 안 된다 (33개 중 17개).
-        정작 봐야 할 것은 **결정과 어긋나는 자료가 있는데도 그렇게 정해진 것**이다.
-        예: 훈련 기록으로 기이수 확정됐는데 반장 확인서에는 「그 자세는 담당한 적 없다」.
-        """
-        pl = x["payload"]
-        odd = bool(pl.get("conflicts")) or bool(pl.get("needs_expert_review")) or (
-            pl.get("decided_by") == "rule" and pl.get("negative_statements"))
-        if odd:
-            return "look"
-        return "rule" if pl.get("decided_by") == "rule" else "rest"
-
-    BUCKETS = [
-        ("look", "먼저 보실 것",
-         "결정과 어긋나는 자료가 있습니다. 그대로 두실지 내리실지 정해 주세요", "no", True),
-        ("rest", "판단이 필요한 것",
-         "근거를 보시고 인정 여부를 정하십시오", "wn", True),
-        ("rule", "기록으로 확정된 것",
-         "훈련이수증에 능력단위코드·시간·평가결과가 적혀 있어 규칙대로 정해진 항목입니다. "
-         "확인만 하시면 됩니다", "ok", False),
-    ]
-    buckets: dict[str, list[dict]] = {}
-    for x in els:
-        buckets.setdefault(bucket(x), []).append(x)
+    # 선별 규칙은 services/review/triage.py 한 곳에만 둔다 — 개요 화면과
+    # 이 화면이 각자 판단하면 「몇 개 남았나」가 서로 다르게 나온다.
+    buckets = split(els)
 
     secs = ""
     for key, title, hint, badge, open_ in BUCKETS:
@@ -365,7 +342,7 @@ def render_review(s: Session, assessment_id: int) -> str:
         bulk = "".join(
             f'<button class="sm" data-d="{d}" onclick="bulk(this)">'
             f'{d} {len(items)}개</button>'
-            for d in (("인정",) if key == "rule" else ("인정", "조건부인정")))
+            for d in (("인정",) if key == SETTLED else ("인정", "조건부인정")))
         cards = "".join(_element(x, frags, rv, names, unit_names) for x in
                         sorted(items, key=lambda y: (y["recommendation"], y["element_id"])))
         secs += f'''<details class="grp" {"open" if open_ else ""} data-k="{key}">
@@ -395,6 +372,12 @@ def render_review(s: Session, assessment_id: int) -> str:
         f'<div class="lg"><span class="dot" style="background:var(--{REC[k][0]})"></span>'
         f'{k} {REC[k][1]}</div>' for k in ["R0", "R1", "R2", "R3", "R4", "R5"])
 
+    n_settled = len(buckets.get(SETTLED) or [])
+    n_judge = sm.n_elements - n_settled
+    settled_line = (f"나머지 {n_settled}개는 훈련이수증에 능력단위코드·시간·평가결과가 "
+                    f"적혀 있어 규칙으로 확정된 항목입니다 — 묶음째 확인하시면 됩니다."
+                    if n_settled else "")
+
     means = "".join(
         f'<div><b>{e(k)}</b> {e(v)}</div>'
         for k, v in (rb.final_decision.get("element_decision_meanings") or {}).items())
@@ -408,8 +391,8 @@ def render_review(s: Session, assessment_id: int) -> str:
     return page_open(f"선행학습인정 검토 — {a['case_number']}", css=CSS, here="/cases") + f"""
 <div class="crumbs">
  <a href="/submissions/{a['sid']}">← 심사 개요</a>
- <a href="/submissions/{a['sid']}/report/time">시간 대조 보고서</a>
- <a href="/submissions/{a['sid']}/report/evidence">근거 분석 보고서</a>
+ <a href="/submissions/{a['sid']}/report/time">Track A 보고서</a>
+ <a href="/submissions/{a['sid']}/report/evidence">Track B 보고서</a>
  <a href="/audit/{e(a['case_number'])}">감사 기록</a>
 </div>
 <h1>전문가 검토</h1>
@@ -419,10 +402,12 @@ def render_review(s: Session, assessment_id: int) -> str:
  최종판정 <span id="fd">{fd_line}</span></p>
 {banner}
 <div class="note" id="guide">
- <b>무엇을 정하시는가</b> — 요소 하나하나에 대해 아래 넷 중 하나를 고르십시오.
+ <b>보고서 {sm.n_elements}개 항목 가운데 {n_judge}개가 판단 대상입니다.</b>
+ {settled_line}
+ <br><b>무엇을 정하시는가</b> — 항목마다 아래 넷 중 하나를 고르십시오.
  <div class="means">{means}</div>
- 근거 분석 보고서를 먼저 읽고 오시면 어디가 쟁점인지 아신 채로 판단하실 수 있습니다.
- <b>다 읽으실 필요는 없습니다</b> — 손이 가는 정도로 묶어 두었습니다.
+ <a href="/submissions/{a['sid']}/report/evidence">Track B 보고서</a>를 먼저 읽고
+ 오시면 어디가 쟁점인지 아신 채로 판단하실 수 있습니다.
  요소 줄을 누르면 근거가, 인용문 옆 「원문」을 누르면 제출 자료의 해당 대목이 펼쳐집니다.
  <br><b>이 화면은 판정이 아니라 판정의 근거입니다.</b> 인정 여부는 보시는 분이 정하십니다.
 </div>

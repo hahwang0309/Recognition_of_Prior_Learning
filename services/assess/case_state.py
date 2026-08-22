@@ -16,6 +16,8 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from services.review.triage import needs_judgment
+
 # 시간 대조가 이미 값을 뽑아 쓴 자료. 근거 분석에서 「추가 자료」로 세지 않는다.
 TIME_DOC_TYPES = {"과정평가형자격", "NCS 기반 훈련과정 이수증", "교육과정 편성표"}
 
@@ -62,6 +64,9 @@ class CaseState:
     # 이것을 나누지 않았을 때, 재실행 한 번에 완성된 보고서가 화면에서 사라졌다.
     evidence_done: Run | None
     n_reviewed: int                         # ③ 전문가 검토 — 판단이 기록된 요소 수
+    n_judge: int                            # 사람이 따져야 하는 요소 수
+    n_settled: int                          # 기록으로 확정돼 확인만 하면 되는 수
+    judged: int                             # 그중 판단이 기록된 수
     decision: dict | None                   # ④ 최종 판정
 
     # ── ① 시간 대조에서 나온 숫자 ──
@@ -100,9 +105,16 @@ class CaseState:
         return bool(self.evidence and self.evidence.running)
 
     # ── ③ 검토 ──
+    # 진척은 **판단 대상**으로 센다. 훈련이수증으로 확정된 항목까지 한 줄씩
+    # 누르게 하면 정작 따져야 할 것에 쓸 힘이 흩어진다. 확정분은 묶음으로
+    # 한 번에 확인한다 (검토 화면의 「인정 N개」 버튼).
     @property
     def review_done(self) -> bool:
-        return self.n_elements > 0 and self.n_reviewed >= self.n_elements
+        return self.n_judge > 0 and self.judged >= self.n_judge
+
+    @property
+    def review_left(self) -> int:
+        return max(0, self.n_judge - self.judged)
 
     # ── 다음에 할 일 하나 ──
     @property
@@ -116,7 +128,8 @@ class CaseState:
             return None                                  # 진행 중 — 기다린다
         if self.evidence_done:
             if not self.review_done:
-                return ("검토하기", f"/assessments/{self.evidence_done.id}/review")
+                return (f"검토하기 ({self.review_left}개 남음)",
+                        f"/assessments/{self.evidence_done.id}/review")
             return ("최종 판정 기록", f"/assessments/{self.evidence_done.id}/review#decide")
         if self.can_analyze:
             return ("근거 분석 시작", "analyze")
@@ -173,11 +186,23 @@ def case_state(s: Session, submission_id: int) -> CaseState | None:
     runs = _runs(s, submission_id)
     done_runs = _runs(s, submission_id, only_done=True)
     ev, ev_done = runs.get("evidence"), done_runs.get("evidence")
-    n_reviewed = 0
+    n_reviewed = n_judge = n_settled = judged = 0
     if ev_done is not None:
         n_reviewed = s.execute(text(
             "SELECT count(DISTINCT element_id) FROM element_review WHERE assessment_id=:a"),
             {"a": ev_done.id}).scalar_one()
+        done_ids = {r[0] for r in s.execute(text(
+            "SELECT DISTINCT element_id FROM element_review WHERE assessment_id=:a"),
+            {"a": ev_done.id})}
+        rows = [dict(r) for r in s.execute(text(
+            "SELECT element_id, payload FROM assessment_element WHERE assessment_id=:a"),
+            {"a": ev_done.id}).mappings()]
+        for r in rows:
+            if needs_judgment(r["payload"] or {}):
+                n_judge += 1
+                judged += r["element_id"] in done_ids
+            else:
+                n_settled += 1
 
     dec = s.execute(text("""
         SELECT decision, reason, decided_by, recognized_hours, total_hours, decided_at
@@ -194,6 +219,7 @@ def case_state(s: Session, submission_id: int) -> CaseState | None:
         extra_docs=[d for d in docs if d["doc_type"] not in TIME_DOC_TYPES],
         time=done_runs.get("time") or runs.get("time"),
         evidence=ev, evidence_done=ev_done, n_reviewed=n_reviewed,
+        n_judge=n_judge, n_settled=n_settled, judged=judged,
         decision=dict(dec) if dec else None,
     )
 
