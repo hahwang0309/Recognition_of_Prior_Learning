@@ -1,0 +1,267 @@
+"""전문가 검토 — 요소별 의견을 받아 감면 시간으로 굴린다.
+
+## 원칙
+
+**AI 산출물을 덮어쓰지 않는다.** 전문가 의견은 `element_review` 에 따로 쌓인다.
+나중에 「기계는 R3 라 했는데 사람은 인정했다」 같은 대조가 가능해야 하기 때문이다.
+
+**감면 시간은 계산식을 함께 남긴다.** 몇 시간이 감면됐는지보다
+왜 그 숫자가 나왔는지가 분쟁에서 중요하다.
+
+## 시간을 굴리는 방식
+
+Track B 는 **능력단위요소** 단위로 검토하지만 훈련시간은 **능력단위** 단위로 편성된다.
+둘을 잇는 규칙이 `rubric.final_decision.unit_credit_rule` 이다.
+
+  all_elements   요소가 전부 인정되어야 그 능력단위 시간을 감면한다 (보수적, 기본값)
+  proportional   인정된 요소 비율만큼 감면한다
+
+⚠ 이 규칙은 아직 확정되지 않았다(D-7). 그래서 **두 방식의 결과를 모두 계산해** 보여준다.
+간담회에서 고르면 YAML 한 줄이 바뀐다.
+
+조건부인정은 면접·실기를 통과해야 확정되므로 **확정분과 나누어** 센다.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import date
+from typing import Any
+
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from krpl_core.audit import AuditStore
+from krpl_core.config import get_rubric
+
+
+@dataclass
+class UnitRoll:
+    """능력단위 하나의 검토 현황."""
+    unit_code: str
+    unit_name: str
+    required_hours: int
+    n_elements: int
+    n_인정: int = 0
+    n_조건부인정: int = 0
+    n_불인정: int = 0
+    n_보류: int = 0
+    n_미검토: int = 0
+
+    @property
+    def n_reviewed(self) -> int:
+        return self.n_elements - self.n_미검토
+
+    def hours(self, rule: str, conditional: bool) -> float:
+        """감면 시간. conditional=True 면 조건부인정도 포함해 센다."""
+        ok = self.n_인정 + (self.n_조건부인정 if conditional else 0)
+        if rule == "proportional":
+            return self.required_hours * ok / self.n_elements if self.n_elements else 0.0
+        return float(self.required_hours) if ok == self.n_elements else 0.0
+
+
+@dataclass
+class ReviewSummary:
+    assessment_id: int
+    case_number: str
+    program_id: str
+    total_hours: int
+    rule: str
+    units: list[UnitRoll] = field(default_factory=list)
+    counts: dict[str, int] = field(default_factory=dict)
+    n_elements: int = 0
+    n_reviewed: int = 0
+    n_expert_review: int = 0
+
+    @property
+    def complete(self) -> bool:
+        return self.n_reviewed == self.n_elements and self.n_elements > 0
+
+    def hours(self, rule: str | None = None, conditional: bool = False) -> int:
+        return round(sum(u.hours(rule or self.rule, conditional) for u in self.units))
+
+    def rate(self, rule: str | None = None, conditional: bool = False) -> float:
+        return self.hours(rule, conditional) / self.total_hours if self.total_hours else 0.0
+
+    def suggest_decision(self) -> str:
+        """권고안. 사람이 바꿀 수 있다 — 시스템이 확정하지 않는다."""
+        th = get_rubric().final_decision["thresholds"]
+        r = self.rate()
+        if r >= th["전체인정"]:
+            return "전체인정"
+        return "불인정" if r <= th["불인정"] else "부분인정"
+
+    def basis(self) -> dict[str, Any]:
+        """계산식을 통째로 남긴다. 나중에 「왜 이 숫자냐」에 답하기 위한 것."""
+        return {
+            "rule": self.rule,
+            "total_hours": self.total_hours,
+            "확정": {"hours": self.hours(), "rate": round(self.rate(), 4)},
+            "조건부포함": {"hours": self.hours(conditional=True),
+                        "rate": round(self.rate(conditional=True), 4)},
+            "다른_규칙_적용시": {
+                r: {"확정": self.hours(r), "조건부포함": self.hours(r, True)}
+                for r in ("all_elements", "proportional") if r != self.rule},
+            "counts": self.counts,
+            "units": [{"unit_code": u.unit_code, "unit_name": u.unit_name,
+                       "required_hours": u.required_hours, "n_elements": u.n_elements,
+                       "인정": u.n_인정, "조건부인정": u.n_조건부인정,
+                       "불인정": u.n_불인정, "보류": u.n_보류, "미검토": u.n_미검토,
+                       "감면": round(u.hours(self.rule, False), 1)} for u in self.units],
+        }
+
+
+def _unit_of(element_id: str) -> str:
+    """1601050111_21v3.2 → 1601050111"""
+    return element_id.split("_", 1)[0]
+
+
+def review_summary(s: Session, assessment_id: int) -> ReviewSummary:
+    rb = get_rubric()
+    a = s.execute(text("""
+        SELECT a.id, s.case_number, s.target_program_id, p.total_hours
+        FROM assessment a JOIN submission s ON s.id = a.submission_id
+        LEFT JOIN catalog_wsd_program p ON p.program_id = s.target_program_id
+        WHERE a.id = :i"""), {"i": assessment_id}).mappings().one()
+
+    hours = {r[0]: (r[1], r[2]) for r in s.execute(text("""
+        SELECT r.unit_code, COALESCE(r.unit_name, r.unit_code), r.required_hours
+        FROM catalog_wsd_required r WHERE r.program_id = :p"""),
+        {"p": a["target_program_id"]})}
+
+    rows = list(s.execute(text("""
+        SELECT e.element_id, e.recommendation,
+               COALESCE((e.payload->>'needs_expert_review')::bool, false) AS flag,
+               v.decision
+        FROM assessment_element e
+        LEFT JOIN element_review v
+               ON v.assessment_id = e.assessment_id AND v.element_id = e.element_id
+        WHERE e.assessment_id = :i ORDER BY e.element_id"""),
+        {"i": assessment_id}).mappings())
+
+    rolls: dict[str, UnitRoll] = {}
+    counts = {d: 0 for d in rb.final_decision["element_decisions"]}
+    counts["미검토"] = 0
+    for r in rows:
+        uc = _unit_of(r["element_id"])
+        name, req = hours.get(uc, (uc, 0))
+        u = rolls.setdefault(uc, UnitRoll(uc, name, req or 0, 0))
+        u.n_elements += 1
+        d = r["decision"] or "미검토"
+        counts[d] = counts.get(d, 0) + 1
+        setattr(u, f"n_{d}", getattr(u, f"n_{d}") + 1)
+
+    return ReviewSummary(
+        assessment_id=assessment_id, case_number=a["case_number"],
+        program_id=a["target_program_id"], total_hours=a["total_hours"] or 0,
+        rule=rb.final_decision["unit_credit_rule"],
+        units=sorted(rolls.values(), key=lambda u: (-u.required_hours, u.unit_code)),
+        counts=counts, n_elements=len(rows),
+        n_reviewed=sum(1 for r in rows if r["decision"]),
+        n_expert_review=sum(1 for r in rows if r["flag"]),
+    )
+
+
+def save_element_review(s: Session, assessment_id: int, element_id: str,
+                        decision: str, note: str | None = None,
+                        reviewer: str | None = None) -> dict[str, Any]:
+    rb = get_rubric()
+    if decision not in rb.final_decision["element_decisions"]:
+        raise ValueError(f"의견 값이 잘못됨: {decision} "
+                         f"(가능: {rb.final_decision['element_decisions']})")
+    rec = s.execute(text("""
+        SELECT recommendation FROM assessment_element
+        WHERE assessment_id=:a AND element_id=:e"""),
+        {"a": assessment_id, "e": element_id}).scalar()
+    if rec is None:
+        raise LookupError(f"해당 요소가 없습니다: {element_id}")
+
+    s.execute(text("""
+        INSERT INTO element_review (assessment_id, element_id, decision,
+                                    ai_recommendation, note, reviewer)
+        VALUES (:a, :e, :d, :r, :n, :w)
+        ON CONFLICT (assessment_id, element_id) DO UPDATE
+        SET decision=EXCLUDED.decision, note=EXCLUDED.note,
+            reviewer=EXCLUDED.reviewer, reviewed_at=now()"""),
+        {"a": assessment_id, "e": element_id, "d": decision, "r": rec,
+         "n": note, "w": reviewer})
+    s.execute(text("""INSERT INTO audit_log (entity, entity_id, action, actor, detail)
+                      VALUES ('element_review', :i, 'saved', :w, CAST(:d AS jsonb))"""),
+              {"i": f"{assessment_id}:{element_id}", "w": reviewer or "unknown",
+               "d": f'{{"decision":"{decision}","ai":"{rec}"}}'})
+    _snapshot_reviews(s, assessment_id)
+    return {"element_id": element_id, "decision": decision, "ai_recommendation": rec,
+            "agrees_with_ai": (decision == "인정") == (rec == "R0")}
+
+
+def _snapshot_reviews(s: Session, assessment_id: int) -> None:
+    """검토 현황을 파일로 갱신한다. 최종 판정 전에도 열어 볼 수 있어야 한다."""
+    r = s.execute(text("""SELECT sub.id, sub.case_number FROM assessment a
+                          JOIN submission sub ON sub.id=a.submission_id WHERE a.id=:i"""),
+                  {"i": assessment_id}).mappings().one()
+    rows = [dict(x) | {"reviewed_at": x["reviewed_at"].isoformat()} for x in s.execute(text("""
+        SELECT element_id, decision, ai_recommendation, note, reviewer, reviewed_at
+        FROM element_review WHERE assessment_id=:i ORDER BY element_id"""),
+        {"i": assessment_id}).mappings()]
+    diff = sum(1 for x in rows if (x["decision"] == "인정") != (x["ai_recommendation"] == "R0"))
+    AuditStore(s, r["case_number"], r["id"], assessment_id).write(
+        "review", "요소별검토", rows, seq=1,
+        note=f"{len(rows)}개 기록 · AI 권고와 다른 판단 {diff}건")
+
+
+def record_decision(s: Session, assessment_id: int, decision: str,
+                    reason: str | None = None, decided_by: str | None = None,
+                    recognized_hours: int | None = None,
+                    conditional: bool = False, allow_incomplete: bool = False) -> dict[str, Any]:
+    """최종 판정을 기록한다. 감면 시간은 검토 결과에서 계산하되 사람이 덮어쓸 수 있다."""
+    rb = get_rubric()
+    if decision not in rb.final_decision["decisions"]:
+        raise ValueError(f"판정 값이 잘못됨: {decision} (가능: {rb.final_decision['decisions']})")
+
+    sm = review_summary(s, assessment_id)
+    if not sm.complete and not allow_incomplete:
+        raise ValueError(f"검토가 끝나지 않았습니다 ({sm.n_reviewed}/{sm.n_elements}). "
+                         f"그래도 기록하려면 allow_incomplete=true")
+
+    hours = recognized_hours if recognized_hours is not None else sm.hours(conditional=conditional)
+    basis = sm.basis()
+    basis["conditional_counted"] = conditional
+    basis["hours_overridden"] = recognized_hours is not None
+    basis["suggested_decision"] = sm.suggest_decision()
+    basis["pending_rubric_decisions"] = [p.key for p in rb.pending_decisions]
+
+    sid = s.execute(text("SELECT submission_id FROM assessment WHERE id=:i"),
+                    {"i": assessment_id}).scalar_one()
+    s.execute(text("""
+        INSERT INTO final_decision (submission_id, assessment_id, decision, reason,
+                                    decided_by, decided_on, recognized_hours,
+                                    total_hours, credit_basis)
+        VALUES (:s, :a, :d, :r, :w, :o, :h, :t, CAST(:b AS jsonb))
+        ON CONFLICT (submission_id) DO UPDATE
+        SET assessment_id=EXCLUDED.assessment_id, decision=EXCLUDED.decision,
+            reason=EXCLUDED.reason, decided_by=EXCLUDED.decided_by,
+            decided_on=EXCLUDED.decided_on, recognized_hours=EXCLUDED.recognized_hours,
+            total_hours=EXCLUDED.total_hours, credit_basis=EXCLUDED.credit_basis,
+            decided_at=now()"""),
+        {"s": sid, "a": assessment_id, "d": decision, "r": reason, "w": decided_by,
+         "o": date.today(), "h": hours, "t": sm.total_hours,
+         "b": __import__("json").dumps(basis, ensure_ascii=False)})
+    # ── 감사 기록 — 사람이 무엇을 보고 무엇을 정했는지 ──
+    case = s.execute(text("SELECT case_number FROM submission WHERE id=:i"),
+                     {"i": sid}).scalar_one()
+    store = AuditStore(s, case, sid, assessment_id)
+    _snapshot_reviews(s, assessment_id)
+    store.write("decide", "최종판정", {
+        "판정": decision, "감면시간": hours, "총시간": sm.total_hours,
+        "사유": reason, "판정자": decided_by, "판정일": str(date.today()),
+        "산출근거": basis}, seq=1,
+        note=f"{decision} · {hours}/{sm.total_hours}시간"
+             + (" · 시간 직접 지정" if basis["hours_overridden"] else " · 검토 결과에서 계산"))
+
+    s.execute(text("UPDATE submission SET status='decided' WHERE id=:i"), {"i": sid})
+    s.execute(text("""INSERT INTO audit_log (entity, entity_id, action, actor, detail)
+                      VALUES ('final_decision', :i, :d, :w, CAST(:b AS jsonb))"""),
+              {"i": str(sid), "d": decision, "w": decided_by or "unknown",
+               "b": __import__("json").dumps(basis, ensure_ascii=False)})
+    return {"submission_id": sid, "assessment_id": assessment_id, "decision": decision,
+            "recognized_hours": hours, "total_hours": sm.total_hours,
+            "credit_basis": basis}

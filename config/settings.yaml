@@ -1,0 +1,71 @@
+# 공통 기본값. 환경별 덮어쓰기는 config/environments/{env}.yaml
+app:
+  name: K-RPL 심사 지원 시스템
+  case_number_prefix: R              # 심사번호 R2026-0001
+  timezone: Asia/Seoul
+
+rubric:
+  active_version: "0.2"              # config/rubric/{version}.yaml
+  fail_on_pending: false             # true 면 미확정 항목이 있을 때 기동 거부
+
+prompt:
+  trackb_version: trackb_v5          # config/prompts/{version}.md
+
+storage:
+  backend: local                     # local | s3
+  local_path: ./storage
+  max_upload_mb: 50
+  # **파서가 실제로 읽는 것만** 받는다. 기동 시 대조하며, 어긋나면 뜨지 않는다.
+  # 못 읽는 형식을 받아 두면 담당자가 올린 뒤에야 「조각 0개」를 보게 된다.
+  allowed_extensions: [pdf, hwp, hwpx, txt, md]
+  # 아직 못 읽는 것 — 받지 않는다
+  #   jpg·jpeg·png  스캔 이미지. ingest.ocr_enabled 를 켜고 OCR 을 붙여야 한다
+  #   docx·xlsx     파서 미구현
+  # 지원자가 이 형식으로 냈다면 담당자가 PDF 로 바꿔 올린다.
+
+ingest:
+  ocr_enabled: false                 # 이미지 OCR — 2단계에서 활성화
+  masking:
+    enabled: true                    # 원본 서류 식별정보 자동 마스킹
+    patterns: [주민등록번호, 전화번호, 이메일, 계좌번호]
+
+queue:
+  backend: postgres                  # postgres | celery
+  poll_interval_sec: 5
+  max_attempts: 3
+  backoff_base_sec: 30
+
+assessment:
+  validation_max_retries: 3          # 검증 실패 시 LLM 재요청 횟수
+  on_validation_exhausted: manual_review
+
+  # 능력단위 단위로 나눠 호출한다.
+  #   unit  능력단위마다 따로 (기본값)
+  #   none  한 번에 전부
+  #
+  # 실측 (4건 × 2방식, effort medium, 2026-08-22):
+  #                건당 비용   건당 시간   연 1,000건
+  #   unit          $2.63     6분25초    $2,630 · 107시간
+  #   none          $1.67     12분06초   $1,670 · 202시간
+  #
+  # 단일이 37% 싸고 청크가 47% 빠르다 — 4건 모두에서 방향이 같았다.
+  # 판정 품질(권고 분포·대면평가 수)에는 일정한 차이가 없었다.
+  # 비용보다 처리 시간과 확장성을 택해 unit 을 기본값으로 둔다.
+  #
+  # unit 을 택한 이유 넷:
+  #   ① 틀린 능력단위만 다시 받는다 (none 은 요소 하나 틀리면 전량 재생성)
+  #   ② 출력이 잘리지 않는다 — 청크당 상한 대비 2~3%
+  #   ③ 컨텍스트가 작은 모델로 갈 수 있다 (청크당 입력 1만 1천 · 출력 4천 토큰)
+  #   ④ 동시 실행으로 시간이 절반
+  #
+  # 한 건만 다르게 돌려 보려면:  ./scripts/dev.sh assess <심사번호> --chunk-by none
+  chunk_by: unit
+  chunk_concurrency: 4               # 동시에 보낼 청크 수. 1 이면 순차
+  synthesize_overall: true           # 전체 소견을 별도 호출로 종합 (청크 간 맥락 보완)
+
+retention:
+  years: null                        # ⚠ 미정 — 소관기관 확정 필요
+
+logging:
+  level: INFO
+  format: json

@@ -1,0 +1,398 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Track B 증거 분석 결과",
+  "description": "판정이 아니라 판정의 근거다. 최종 판정은 전문가 TF가 한다.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "applicant_id",
+    "target_program",
+    "prior_learning_review",
+    "elements",
+    "overall_note"
+  ],
+  "properties": {
+    "applicant_id": {
+      "type": "string",
+      "description": "심사번호"
+    },
+    "target_program": {
+      "type": "string"
+    },
+    "prior_learning_review": {
+      "type": "string",
+      "description": "기이수 교육과정을 어떻게 반영했는지 3~5문장"
+    },
+    "overall_note": {
+      "type": "string",
+      "description": "전반 소견 4~6문장"
+    },
+    "elements": {
+      "type": "array",
+      "description": "입력 패키지의 능력단위요소와 개수·식별자가 정확히 같아야 한다",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "element_id",
+          "evidence",
+          "period_backing",
+          "prior_learning",
+          "uncovered_ksa",
+          "remediation",
+          "negative_statements",
+          "evidence_level",
+          "proven_dimensions",
+          "missing_dimensions",
+          "source_grades",
+          "negative_grades",
+          "recommendation",
+          "recommendation_reason",
+          "verification_method",
+          "qualitative_note",
+          "conflicts",
+          "confidence"
+        ],
+        "properties": {
+          "element_id": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "ksa_ref",
+                "fids",
+                "grade",
+                "quote",
+                "why"
+              ],
+              "properties": {
+                "ksa_ref": {
+                  "type": "string",
+                  "description": "그 요소의 ksa[].ref 실재값"
+                },
+                "fids": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "grade": {
+                  "type": "string",
+                  "enum": [
+                    "A",
+                    "B",
+                    "C",
+                    "D",
+                    "E"
+                  ]
+                },
+                "quote": {
+                  "type": "string",
+                  "description": "해당 fid text의 연속 부분문자열. 요약·의역 금지"
+                },
+                "why": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "period_backing": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "fids",
+              "grades",
+              "note"
+            ],
+            "properties": {
+              "fids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "grades": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "A",
+                    "B",
+                    "C",
+                    "D",
+                    "E"
+                  ]
+                }
+              },
+              "note": {
+                "type": "string"
+              }
+            }
+          },
+          "prior_learning": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "applies"
+            ],
+            "properties": {
+              "applies": {
+                "type": "boolean"
+              },
+              "unit_code": {
+                "type": "string"
+              },
+              "completed_hours": {
+                "type": "integer"
+              },
+              "required_hours": {
+                "type": "integer"
+              },
+              "evaluation": {
+                "type": "string"
+              },
+              "fid": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "description": "R0(기이수 인정검토)가 아니면 {\"applies\": false} 만 넣는다"
+          },
+          "uncovered_ksa": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "ref",
+                "status"
+              ],
+              "properties": {
+                "ref": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "교육이수(미평가)",
+                    "미확보",
+                    "부정진술"
+                  ]
+                },
+                "note": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "remediation": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "ksa_refs",
+                "method",
+                "item",
+                "reason"
+              ],
+              "properties": {
+                "ksa_refs": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "method": {
+                  "type": "string",
+                  "enum": [
+                    "추가서류",
+                    "면접",
+                    "실기",
+                    "훈련"
+                  ]
+                },
+                "item": {
+                  "type": "string"
+                },
+                "oral_check": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "alt_document": {
+                  "type": "string",
+                  "description": "이 서류를 내면 대면평가를 갈음한다. 실기 면제 금지 항목이면 이 항목을 넣지 않는다"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "negative_statements": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "fid",
+                "quote"
+              ],
+              "properties": {
+                "fid": {
+                  "type": "string"
+                },
+                "quote": {
+                  "type": "string"
+                },
+                "note": {
+                  "type": "string"
+                },
+                "stype": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "evidence_level": {
+            "type": "string",
+            "enum": [
+              "충분",
+              "부분",
+              "없음",
+              "부정진술"
+            ]
+          },
+          "proven_dimensions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "missing_dimensions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "source_grades": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "A",
+                "B",
+                "C",
+                "D",
+                "E"
+              ]
+            }
+          },
+          "negative_grades": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "A",
+                "B",
+                "C",
+                "D",
+                "E"
+              ]
+            }
+          },
+          "recommendation": {
+            "type": "string",
+            "enum": [
+              "R0",
+              "R1",
+              "R2",
+              "R3",
+              "R4",
+              "R5"
+            ]
+          },
+          "recommendation_reason": {
+            "type": "string"
+          },
+          "verification_method": {
+            "type": "string",
+            "enum": [
+              "불필요",
+              "화상면접",
+              "대면실기",
+              "추가서류",
+              "훈련"
+            ]
+          },
+          "qualitative_note": {
+            "type": "string",
+            "description": "2~4문장. 방법론 코드 나열 금지, 현장 언어"
+          },
+          "conflicts": {
+            "type": "array",
+            "description": "자료 간 상충. 폐기하지 않고 기록에 남긴다 (기준서 R7). 없으면 빈 배열",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "topic",
+                "adopted",
+                "rejected",
+                "note"
+              ],
+              "properties": {
+                "topic": {
+                  "type": "string",
+                  "description": "무엇이 엇갈렸는지"
+                },
+                "adopted": {
+                  "type": "string",
+                  "description": "채택한 쪽과 그 이유"
+                },
+                "rejected": {
+                  "type": "string",
+                  "description": "기각한 쪽. 없으면 빈 문자열"
+                },
+                "note": {
+                  "type": "string",
+                  "description": "덧붙일 말. 없으면 빈 문자열"
+                }
+              }
+            }
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "element_name": {
+            "type": "string"
+          },
+          "unit_name": {
+            "type": "string"
+          },
+          "suggested_questions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

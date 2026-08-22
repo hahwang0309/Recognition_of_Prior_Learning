@@ -1,0 +1,5 @@
+krpl_core
+krpl_llm
+krpl_parsers
+krpl_rules
+services

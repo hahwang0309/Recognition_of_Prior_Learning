@@ -1,0 +1,103 @@
+"""화면 공통 껍데기 — 색·간격·머리말을 한곳에서 정한다.
+
+화면이 늘어날 때마다 CSS 를 복사해 붙이면 곧 서로 어긋난다.
+여기 한 벌만 두고 각 화면은 자기 것만 얹는다.
+
+담는 사람은 RPL·직종 전문가와 담당자다. 화면에 내부 용어를 쓰지 않는다.
+"""
+from __future__ import annotations
+
+import html
+
+e = lambda x: html.escape(str(x) if x is not None else "")   # noqa: E731
+
+# 화면 목록 — 머리말 차림표. (경로, 이름)
+NAV = [("/", "홈"), ("/cases", "접수 현황"), ("/submissions/new", "새 접수"),
+       ("/audit", "감사"), ("/stats", "운영 통계")]
+
+BASE = """*{box-sizing:border-box}
+:root{--s1:#fcfcfb;--s2:#f4f4f1;--s3:#eceae4;--bd:#e0e0da;--tp:#0b0b0b;--ts:#4a4a46;--tm:#84837c;
+ --ac:#3f8ed0;--ok:#0ca30c;--wn:#fab219;--no:#d03b3b;
+ --r0:#0ca30c;--r1:#3f8ed0;--r2:#fab219;--r3:#e07b39;--r4:#9166cc;--r5:#d03b3b}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]){--s1:#1a1a19;--s2:#232322;
+ --s3:#2b2b29;--bd:#3a3a38;--tp:#fff;--ts:#c3c2b7;--tm:#8f8e86}}
+body{margin:0;background:var(--s1);color:var(--tp);
+ font:14px/1.65 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",Pretendard,sans-serif}
+a{color:var(--ac);text-decoration:none}a:hover{text-decoration:underline}
+.top{border-bottom:1px solid var(--bd);background:var(--s2)}
+.top .in{max-width:1080px;margin:0 auto;padding:0 20px;display:flex;align-items:center;
+ gap:20px;flex-wrap:wrap;min-height:48px}
+.top .bx{font-weight:600;font-size:13.5px;color:var(--tp);white-space:nowrap}
+.top nav{display:flex;gap:16px;flex:1;flex-wrap:wrap}
+.top nav a{font-size:13px;color:var(--ts);padding:14px 0;border-bottom:2px solid transparent}
+.top nav a.on{color:var(--tp);border-bottom-color:var(--ac);font-weight:600}
+.top .env{font-size:11.5px;color:var(--tm);white-space:nowrap}
+.wrap{max-width:1080px;margin:0 auto;padding:26px 20px 80px}
+h1{font-size:23px;margin:0 0 4px}.sub{color:var(--tm);font-size:12.5px;margin:0 0 20px}
+h2{font-size:15.5px;margin:26px 0 10px}
+.note{background:var(--s2);border:1px solid var(--bd);border-left:3px solid var(--ac);
+ border-radius:8px;padding:11px 15px;margin-bottom:18px;font-size:12.8px;color:var(--ts)}
+.note.warn{border-left-color:var(--no)}
+.note b{color:var(--tp)}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th,td{padding:8px 10px;border-bottom:1px solid var(--bd);text-align:left;vertical-align:top}
+th{color:var(--tm);font-weight:600;font-size:11.5px;white-space:nowrap}
+td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+tbody tr:hover td{background:var(--s2)}
+.st{display:inline-block;font-size:11px;padding:1.5px 8px;border-radius:10px;
+ background:var(--s3);color:var(--ts);white-space:nowrap}
+.st.ok{background:var(--ok);color:#fff}.st.wn{background:var(--wn);color:#3a2a00}
+.st.no{background:var(--no);color:#fff}.st.ac{background:var(--ac);color:#fff}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px;margin-bottom:18px}
+.kpi{background:var(--s2);border:1px solid var(--bd);border-radius:9px;padding:10px 13px}
+.kpi span{display:block;font-size:11.5px;color:var(--tm)}
+.kpi b{font-size:22px;font-variant-numeric:tabular-nums}
+.kpi b i{font-size:12px;font-style:normal;color:var(--ts);margin-left:2px}
+.kpi em{display:block;font-style:normal;font-size:11px;color:var(--tm);margin-top:2px}
+label{display:block;font-size:12px;color:var(--tm);margin-bottom:4px}
+input,select,textarea{font:inherit;font-size:13px;padding:7px 11px;width:100%;
+ border:1px solid var(--bd);border-radius:7px;background:var(--s1);color:var(--tp)}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--ac);outline-offset:-1px}
+.row{display:grid;gap:12px;margin-bottom:14px}
+.row.two{grid-template-columns:1fr 1fr}.row.three{grid-template-columns:1fr 1fr 1fr}
+button{font:inherit;font-size:13px;padding:7px 16px;border-radius:7px;cursor:pointer;
+ border:1px solid var(--bd);background:var(--s1);color:var(--ts)}
+button:hover{border-color:var(--tm)}
+button.go{background:var(--tp);color:var(--s1);border-color:transparent;font-weight:600}
+button.go:disabled{opacity:.4;cursor:not-allowed}
+button.sm{font-size:12px;padding:3px 10px}
+.card{background:var(--s2);border:1px solid var(--bd);border-radius:10px;padding:15px 17px;
+ margin-bottom:12px}
+.msg{font-size:12.8px;padding:9px 13px;border-radius:7px;margin:10px 0}
+.msg.ok{background:rgba(12,163,12,.12);color:var(--ok)}
+.msg.no{background:rgba(208,59,59,.12);color:var(--no)}
+footer{color:var(--tm);font-size:11.5px;border-top:1px solid var(--bd);padding-top:14px;margin-top:28px}
+@media(max-width:680px){.row.two,.row.three{grid-template-columns:1fr}}"""
+
+
+def page(title: str, body: str, *, css: str = "", here: str = "",
+         env: str = "", scripts: str = "") -> str:
+    """한 화면. body 는 .wrap 안에 들어간다."""
+    nav = "".join(f'<a href="{p}"{" class=on" if p == here else ""}>{e(n)}</a>'
+                  for p, n in NAV)
+    return f"""<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{e(title)}</title><style>{BASE}
+{css}</style></head><body>
+<div class="top"><div class="in">
+  <span class="bx">일학습병행 선행학습인정</span>
+  <nav>{nav}</nav>
+  <span class="env">{e(env)}</span>
+</div></div>
+<div class="wrap">{body}</div>
+{scripts}</body></html>"""
+
+
+def env_label(settings, rubric) -> str:
+    """어느 환경에서 무슨 기준으로 도는지. 화면마다 보이게 둔다."""
+    bits = [f"기준 v{rubric.version}"]
+    if rubric.pending_decisions:
+        bits.append(f"미확정 {len(rubric.pending_decisions)}건")
+    if settings.env != "prod":
+        bits.append(settings.env)
+    return " · ".join(bits)

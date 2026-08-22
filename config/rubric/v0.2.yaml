@@ -1,0 +1,219 @@
+# ═══════════════════════════════════════════════════════════════
+#  RPL 증거 평가 기준 v0.2  —  기계 판독용
+#
+#  ※ 이 파일이 심사 기준의 단일 출처입니다.
+#    기준서(docs/RPL_TrackB_증거평가기준(안)_v0.2.docx)와 내용이 일치해야 합니다.
+#    값을 바꾸면 그 시점 이후 접수분부터 적용되며,
+#    각 심사 기록에 rubric_version 이 남습니다.
+#
+#  status: confirmed | pending  —  pending 은 간담회 확정 대기
+# ═══════════════════════════════════════════════════════════════
+version: "0.2"
+effective_from: "2026-09-01"
+source_document: "RPL_TrackB_증거평가기준(안)_v0.2.docx"
+
+# ── 신뢰도 등급 ────────────────────────────────────────────────
+grades:
+  A: {label: 공적증빙,   verification: 발급기관 온라인 조회, forgery_risk: low}
+  B: {label: 기관발급,   verification: 발급처 확인,          forgery_risk: medium}
+  C: {label: 산출물·기록, verification: 실물 대조·실기 재현,   forgery_risk: medium}
+  D: {label: 제3자진술,  verification: 진술자 신원 확인,      forgery_risk: high}
+  E: {label: 본인진술,   verification: 불가,                 forgery_risk: n/a}
+grade_order: [A, B, C, D, E]
+
+# ── 증명 차원 ──────────────────────────────────────────────────
+dimensions: [신원, 소속·기간, 직무명, 수행내용, 역량수준, 최신성]
+
+# ── 자료유형 × 증명차원  (full=○, partial=△, none=—) ───────────
+document_types:
+  국가기술자격증:
+    grade: A
+    proves: {신원: full, 직무명: full, 수행내용: partial, 역량수준: full, 최신성: partial}
+    note: 국가가 역량을 평가한 자료 — 제Ⅱ장 원칙의 예외
+  학위·성적증명서:
+    grade: A
+    proves: {신원: full, 소속·기간: full, 직무명: full, 수행내용: partial, 역량수준: partial, 최신성: partial}
+    note: 교과목명만으로는 능력단위 대응 불확실 — 편성표 필요
+  4대보험_가입내역:
+    grade: A
+    proves: {신원: full, 소속·기간: full, 최신성: full}
+    note: 기간 확정에 가장 유용
+  경력증명서:
+    grade: B
+    proves: {신원: full, 소속·기간: full, 직무명: full, 수행내용: partial, 최신성: full}
+  NCS기반_훈련이수증:
+    grade: B
+    proves: {신원: full, 소속·기간: full, 직무명: full, 수행내용: full, 역량수준: full, 최신성: full}
+    requires: [능력단위코드, 이수시간, 내부평가결과]
+    note: 내부평가 합격이 확인될 때만 역량수준 인정 → R0 대상
+  교육과정_편성표:
+    grade: B
+    proves: {직무명: full, 수행내용: full}
+    note: 교과목↔능력단위 대응만 증명. 평가결과는 증명 못 함
+  사내·기관_교육이수내역:
+    grade: B
+    proves: {신원: full, 소속·기간: full, 수행내용: partial, 최신성: partial}
+  비NCS_교육수료증:
+    grade: B
+    proves: {신원: full, 소속·기간: full, 수행내용: partial, 최신성: partial}
+    note: 능력단위 대응 정보 없음 → R0 불가
+  작업일지·업무일지:
+    grade: C
+    proves: {소속·기간: partial, 직무명: full, 수행내용: full, 역량수준: partial, 최신성: full}
+  포트폴리오·산출물:
+    grade: C
+    proves: {수행내용: full, 역량수준: full, 최신성: partial}
+  제3자_확인서:
+    grade: D
+    proves: {소속·기간: partial, 직무명: full, 수행내용: partial, 역량수준: partial, 최신성: partial}
+  경력기술서·자기소개서:
+    grade: E
+    proves: {소속·기간: partial, 직무명: full, 수행내용: full, 역량수준: partial}
+
+# ── 권고 구분 ──────────────────────────────────────────────────
+recommendations:
+  R0:
+    label: 기이수 인정검토
+    action: 추가 확인 없음
+    priority: 0                       # 낮을수록 먼저 적용
+    requires:
+      prior_learning: true
+      evaluation_passed: true
+    downgrade_to: R1
+    downgrade_if: {completed_hours_ratio_below: 0.50}
+  R1:
+    label: 서류인정검토
+    action: 서류만으로 판단 가능
+    priority: 1
+    requires:
+      performance_proven: true
+      period_backing_grades: [A, B]   # ★ 본인진술(E) 단독 R1 금지
+      negative_statements: false
+      ksa_coverage_min: null          # ⚠ 쟁점 4 — 미정. 확정 전에는 R1 판정 보류
+  R2: {label: 면접확인,     action: 화상면접,      priority: 2}
+  R3: {label: 실기확인,     action: 대면실기·시연,  priority: 3}
+  R4: {label: 추가서류요청, action: 서류 보완,     priority: 4}
+  R5: {label: 미인정,       action: 훈련 이수,     priority: 5}
+
+# ── 보조 규칙 ──────────────────────────────────────────────────
+rules:
+  R6_recency:
+    status: pending                   # ⚠ 쟁점 3
+    enabled: true
+    years: {default: 5, fast_changing: 3}
+    fast_changing_daebunryu: ["19", "20"]     # 전기·전자, 정보통신
+    on_exceed: R3                     # 불인정이 아니라 실기 전환
+  R7_conflict:
+    enabled: true
+    resolution: higher_grade_wins
+    discard_loser: false              # 모순 사실을 기록에 남김
+  R8_negative_priority:
+    enabled: true
+    scope: element                    # ⚠ 쟁점 10 — element | ksa
+    exception_core_ksa: false
+  R12_prior_vs_recency:
+    status: pending                   # ⚠ 쟁점 12
+    winner: prior_learning            # prior_learning | recency | by_occupation
+    manual_skill_daebunryu: ["12", "13", "16"]   # ③ 선택 시 사용
+
+# ── 훈련시간 ───────────────────────────────────────────────────
+training_hours:
+  adjustment_floor: 0.50              # 고시 「−50%까지 조정 가능」
+  cbq_composition_range: {min: 0.80, max: 1.50}   # 과정평가형 편성 허용범위
+
+# ── Track A 판정 (결정론) ──────────────────────────────────────
+#   과정평가형 자격 등 NCS 기반 이수자. 능력단위·시간 대조만으로 판정한다.
+#   ratio = 이수시간 / 요구시간
+track_a:
+  verdicts:                          # 위에서부터 먼저 맞는 것을 채택
+    - id: 완전충족
+      when: {ratio_gte: 1.0}
+      recommendation: R0
+      verification: 불필요
+    - id: 조정범위내
+      when: {ratio_gte: 0.50}        # training_hours.adjustment_floor 과 일치해야 함
+      recommendation: R0
+      verification: 불필요
+      note: 훈련기준 「−50%까지 조정 가능」 조항 적용
+    - id: 시간부족
+      when: {ratio_gt: 0.0}
+      recommendation: R2
+      verification: 화상면접
+      note: 능력단위는 이수했으나 시간이 하한 미만
+    - id: 미이수
+      when: {absent: true}
+      recommendation: R5
+      verification: 훈련
+  confidence:
+    # 과정평가형 편성시간은 기준값이며 기관이 80~150% 범위에서 편성한다.
+    # 하한(80%)으로 계산해도 판정이 그대로면 확정, 바뀌면 추정.
+    rule: recompute_with_composed_hours_min
+    labels: {stable: 확정, unstable: 추정(이수증명 필요)}
+
+# ── AI 산출물 어휘 ─────────────────────────────────────────────
+#   Track B 분석기가 쓸 수 있는 값의 전부. 검증기가 이 목록으로 대조한다.
+#   여기에 없는 값이 나오면 오류로 잡고 재요청한다.
+output_vocabulary:
+  evidence_level: [충분, 부분, 없음, 부정진술]
+  verification_method: [불필요, 화상면접, 대면실기, 추가서류, 훈련]
+  confidence: [high, medium, low]
+
+# ── 보완 부담 최소화 ───────────────────────────────────────────
+remediation:
+  methods: [추가서류, 면접, 실기, 훈련]
+  face_to_face: [면접, 실기]           # 지원자가 출석해야 하는 것
+  burden_order: [추가서류, 면접, 실기]
+  assignment_sequence:
+    - {when: recommendation_is_R0,        then: none}
+    - {when: resolvable_by_document,      then: 추가서류}
+    - {when: has_uncovered_skill_ksa,     then: 실기, absorb_into_oral_check: [지식, 태도]}
+    - {otherwise: 면접}
+  face_to_face_max_per_element: 1
+  merge_practical_by: unit             # 실기는 능력단위 단위로 통합
+  practical_exemption_forbidden:
+    - 안전직결
+    - 신체숙련
+    - 원리미인지
+    - 자료상충_미해소
+    - 최신성_미달
+  practical_max_per_applicant: null    # ⚠ 쟁점 D-6 — 미정
+
+# ── 증거 없는 KSA 상태 ─────────────────────────────────────────
+uncovered_status:
+  교육이수(미평가): {typical_method: 추가서류, allow_practical: false}
+  미확보:          {typical_method: null}
+  부정진술:        {typical_method: 훈련}
+
+# ── 제3자 확인서 ───────────────────────────────────────────────
+third_party_statement:
+  status: pending                     # ⚠ 쟁점 5
+  family_written: downgrade           # reject | downgrade | accept
+  standalone_accepted: false
+  substitute_documents:
+    - 농업경영체등록확인서
+    - 4대보험 가입내역
+    - 농지원부
+    - 출하·거래 실적 증빙
+
+# ── 최종 판정 (전문가 TF) ──────────────────────────────────────
+#   시스템은 여기에 값을 쓰지 않는다. 사람이 기록하는 칸이다.
+final_decision:
+  element_decisions: [인정, 조건부인정, 불인정, 보류]
+  # 능력단위 시간을 감면하는 방식.
+  #   all_elements  요소 전부가 인정되어야 그 능력단위 시간을 감면 (보수적)
+  #   proportional  인정된 요소 비율만큼 감면
+  unit_credit_rule: all_elements    # ⚠ 쟁점 D-7 — 미정
+  # 조건부인정은 면접·실기를 통과해야 확정된다. 두 수를 나눠 보여준다.
+  conditional_counts_toward: 조건부포함
+  decisions: [전체인정, 부분인정, 불인정]
+  thresholds: {전체인정: 1.0, 불인정: 0.0}   # 인정시간 / 총 필수시간
+
+# ── 미확정 항목 색인 (기동 시 경고 출력) ───────────────────────
+pending_decisions:
+  - {key: recommendations.R1.requires.ksa_coverage_min, issue: 쟁점 4, urgency: critical}
+  - {key: rules.R6_recency,                             issue: 쟁점 3, urgency: high}
+  - {key: rules.R8_negative_priority.scope,             issue: 쟁점 10, urgency: high}
+  - {key: rules.R12_prior_vs_recency.winner,            issue: 쟁점 12, urgency: high}
+  - {key: third_party_statement.family_written,         issue: 쟁점 5,  urgency: high}
+  - {key: remediation.practical_max_per_applicant,      issue: D-6,    urgency: medium}
+  - {key: final_decision.unit_credit_rule,              issue: D-7,    urgency: high}

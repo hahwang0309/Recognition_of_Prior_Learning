@@ -1,0 +1,36 @@
+[project]
+name = "krpl"
+version = "0.1.0"
+description = "일학습병행 선행학습인정(RPL) 심사 지원 시스템"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "sqlalchemy>=2.0",
+    "alembic>=1.14",
+    "psycopg[binary]>=3.2",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0",
+    "anthropic>=0.40",
+    "olefile>=0.47",
+    "pypdf>=5.1",
+    "python-multipart>=0.0.12",
+    "structlog>=24.4",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "httpx>=0.27", "ruff>=0.8"]
+
+[tool.setuptools.packages.find]
+where = ["packages", "."]
+include = ["krpl_*", "services*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["packages", "."]

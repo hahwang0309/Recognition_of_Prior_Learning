@@ -1,0 +1,64 @@
+# LLM 호출 파라미터. 코드가 아니라 여기서 관리합니다.
+default: trackb_assess
+
+profiles:
+  trackb_assess:
+    provider: anthropic
+    model: claude-opus-5
+    # 모델 한도는 128,000. 여기는 **상한**이지 예약이 아니므로 올려도 비용이 늘지 않는다.
+    # 64,000 으로 뒀을 때 실측: 2차 응답이 58,604 토큰(92%)을 써서 1차는 잘렸다.
+    #   응답 본문 ≈ 38,000 토큰 (요소 33개 기준)
+    #   + 사고(thinking) ≈ 0~20,000 토큰 — adaptive 라 판단이 어려울수록 늘어난다
+    # 잘리면 JSON 이 깨져 그 시도가 통째로 버려진다. 여유를 크게 둔다.
+    max_tokens: 120000
+    streaming: true                  # 출력 100KB 이상 — 타임아웃 방지
+    thinking: {type: adaptive}
+    # 실측(4건 × 2방식, 2026-08-22)으로 정한 값.
+    # 청크 하나는 요소 3~5개짜리 작은 작업이라 high 는 과했다.
+    #   high  : 사고 50,570 토큰 · $3.571 · 9분01초
+    #   medium: 사고 20,311 토큰 · $3.033 · 7분22초   ← 싸고 빠르다
+    # 판정 품질(권고 분포·근거 수)에는 유의미한 차이가 없었다.
+    effort: medium                   # low|medium|high|xhigh|max
+    # 구조화 출력(JSON 스키마 강제)은 끈다. 2026-08-21 실측 결과 이 스키마는 API 가 거부한다.
+    #   ① object 마다 additionalProperties:false 필요        → 고침
+    #   ② union 타입 21개 (한도 16)                          → 0개로 줄임
+    #   ③ "compiled grammar is too large"                    → 더 줄일 방법 없음
+    # 요소당 필수 항목 18개 × 중첩 배열이라 문법이 한도를 넘는다.
+    # 형식 강제가 없어도 계약은 지켜진다 — krpl_rules/track_b.py 가 원문과 직접 대조하며,
+    # 스키마보다 훨씬 강한 검사(인용문 일치·KSA 전수·기준서 철칙)를 한다.
+    # config/schemas/assessment_output.json 은 계약 문서로 남겨 둔다.
+    structured_output: null
+    cache:
+      enabled: true
+      # 앞에서부터 이 개수만큼의 system 블록에 캐시를 건다.
+      #   1 분석지침 · 2 기준요약 · 3 지원자 자료(문서·조각·기이수)
+      # 셋 다 한 건 안에서는 고정이고, 청크마다 그대로 반복되므로 캐시가 먹는다.
+      # 청크 방식 도입 전에는 재시도 간격이 5분 TTL 을 넘겨 캐시가 무용이었다.
+      blocks: [prompt, rubric, applicant]
+    timeout_sec: 900
+    max_retries: 2
+
+  # 비교·조정용 프로파일. `--profile` 로 그때그때 바꿔 쓴다.
+  trackb_assess_high:
+    inherits: trackb_assess
+    effort: high
+
+  trackb_assess_low:
+    inherits: trackb_assess
+    effort: low
+
+  trackb_assess_batch:               # 대량 재처리용 — 50% 절감
+    inherits: trackb_assess
+    use_batch_api: true
+    effort: medium
+
+# 1M 토큰당 USD. 캐시 읽기는 입력의 10%, 캐시 쓰기는 125%.
+pricing:
+  claude-opus-5:   {input: 5.00, output: 25.00}
+  claude-sonnet-5: {input: 3.00, output: 15.00}
+  claude-haiku-4-5: {input: 1.00, output: 5.00}
+cache_multiplier: {read: 0.10, write: 1.25}
+
+cost_guard:
+  per_assessment_usd_max: 5.0        # 초과 시 관리자 승인 요구
+  daily_usd_max: 100.0

@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.sqlite
+
+# 비밀값 — .env.example 만 저장소에 둔다
+.env
+
+# 제출 자료·감사 산출물 — 개인정보가 들어갈 수 있다
+storage/

@@ -1,0 +1,3 @@
+storage: {local_path: ./storage}
+logging: {level: DEBUG, format: console}
+queue: {poll_interval_sec: 2}

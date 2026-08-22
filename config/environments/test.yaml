@@ -1,0 +1,7 @@
+# 시험 전용.
+# 감사 산출물도, **데이터베이스도** 운영과 분리한다.
+# 파일만 나누고 DB 를 공유하면 시험이 운영 감사 색인을 덮어써 기록이 거짓이 된다.
+database_url: postgresql+psycopg://krpl:krpl@localhost:5432/krpl_test
+storage: {local_path: ./storage/_test}
+logging: {level: WARNING, format: console}
+queue: {poll_interval_sec: 1}
