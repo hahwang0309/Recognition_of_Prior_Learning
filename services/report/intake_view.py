@@ -27,9 +27,15 @@ CSS = """
  border-radius:14px;background:var(--s3);color:var(--ts)}
 .chip button{border:0;background:none;color:var(--tm);padding:0 4px;font-size:15px;line-height:1}
 .chip button:hover{color:var(--no)}
-.drop{border:2px dashed var(--bd);border-radius:10px;padding:26px;text-align:center;
- color:var(--tm);font-size:13px;cursor:pointer;background:var(--s2)}
-.drop.over{border-color:var(--ac);color:var(--ac);background:rgba(63,142,208,.06)}
+.drop{display:block;border:2px dashed var(--bd);border-radius:10px;padding:26px;
+ text-align:center;color:var(--ts);font-size:13px;cursor:pointer;background:var(--s2)}
+.drop:hover{border-color:var(--tm)}
+.drop.over{border-color:var(--ac);color:var(--ac);background:rgba(43,110,166,.07)}
+/* 파일 입력을 display:none 으로 감추면 탭 순서와 접근성 트리에서 사라진다.
+   화면에서만 지우고 초점은 받을 수 있게 둔다 — 그래야 키보드로 서류를 올릴 수 있다. */
+.drop input[type=file]{position:absolute;width:1px;height:1px;opacity:0;
+ overflow:hidden;clip:rect(0 0 0 0)}
+.drop:focus-within{border-color:var(--ac);outline:2px solid var(--ac);outline-offset:2px}
 .files{margin-top:12px}
 .f{display:grid;grid-template-columns:26px 1fr 190px 96px 30px;gap:9px;align-items:center;
  padding:8px 11px;background:var(--s2);border:1px solid var(--bd);border-radius:8px;
@@ -188,12 +194,12 @@ def render_upload(sub: dict, doc_types: list[dict], grades: list[str],
  <br>올린 파일은 <b>식별정보가 자동으로 가려진 뒤</b> 저장됩니다.
 </div>
 
-<div class="drop" id="drop">
+<label class="drop" id="drop" for="file">
  파일을 여기에 끌어놓거나 눌러서 고르세요<br>
  <span style="font-size:11.5px">{" · ".join(accept or [])} · 파일당 {max_mb}MB 까지</span>
  <input type="file" id="file" multiple style="display:none"
         accept="{",".join("." + x for x in (accept or []))}">
-</div>
+</label>
 <div class="files" id="files"></div>
 <div id="msg"></div>
 <div style="display:flex;gap:8px;margin-top:14px">
@@ -239,7 +245,6 @@ function add(list) {{
   draw();
 }}
 
-$('drop').onclick = () => $('file').click();
 $('file').onchange = ev => add(ev.target.files);
 ['dragenter', 'dragover'].forEach(n => $('drop').addEventListener(n, ev => {{
   ev.preventDefault(); $('drop').classList.add('over'); }}));
