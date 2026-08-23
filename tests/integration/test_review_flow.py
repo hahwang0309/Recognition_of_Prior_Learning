@@ -105,19 +105,44 @@ def test_stage_bar_shows_where_you_are(client, aid):
 
 # ── 질문지 ────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("stage,method", [(3, "면접"), (4, "실기")])
+@pytest.mark.parametrize("stage,method", [(2, "추가서류"), (3, "면접"), (4, "실기")])
 def test_question_sheet_has_all_three_parts(client, aid, stage, method):
-    """질문 · 질문의 목적 · 응답에 담겨야 할 주요 사항."""
+    """질문 · 질문의 목적 · 무엇이 확인되면 인정되나.
+
+    부르는 말은 단계마다 다르다 — 서류를 받는 자리에 「응답」은 맞지 않는다.
+    """
+    from services.report.stage_view import COVER_TITLE
     with session_scope() as s:
         ctx = review_ctx(s, aid)
     if not ctx.items.get(method):
         pytest.skip(f"{method} 항목이 없다")
     h = client.get(f"/assessments/{aid}/review/{stage}").text
     assert "왜 이 방법인가" in h, "질문의 목적이 없다"
-    assert "응답에 담겨야 할 것" in h, "응답 필수 사항이 없다"
+    assert COVER_TITLE[stage] in h, "무엇이 확인되면 인정되는지가 없다"
     assert "이것이 풀리면 인정되는 것" in h, "대상 요소가 없다"
     if any(i.oral_check for i in ctx.items[method]):
-        assert re.search(r"<ol class=\"qs\">", h), "질문 목록이 없다"
+        assert re.search(r'<ol class="qs">', h), "질문 목록이 없다"
+
+
+def test_cover_title_fits_the_stage():
+    """서류를 받는 자리에 「응답에 담겨야 할 것」이라 쓰면 안 된다."""
+    from services.report.stage_view import COVER_TITLE
+    assert "응답" not in COVER_TITLE[2] and "서류" in COVER_TITLE[2]
+    assert "응답" in COVER_TITLE[3]
+    assert "실기" in COVER_TITLE[4]
+
+
+def test_waiting_rows_point_at_the_stage_that_resolves_them(clean, client):
+    """「아직 판단하지 않았습니다」만 보고는 어느 단계로 가야 할지 알 수 없다."""
+    aid = clean
+    h = client.get(f"/assessments/{aid}/review/5").text
+    with session_scope() as s:
+        ctx = review_ctx(s, aid)
+    n_wait = sum(1 for v in ctx.outcome_of.values() if v == "대기")
+    assert n_wait, "대기가 없어 시험의 뜻이 없다"
+    assert h.count("단계에서 정하기") == n_wait
+    # 아직 아무것도 안 정했으므로 전부 1단계를 가리켜야 한다
+    assert h.count("1단계에서 정하기") == n_wait
 
 
 def test_must_cover_uses_real_ksa_names(client, aid):

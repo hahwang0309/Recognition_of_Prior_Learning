@@ -31,6 +31,10 @@ LOOK = {2: ("📄", "요청 서류", "받았나"),
 RESULT_WORDS = {2: ("받음", "못 받음", "미실시"),
                 3: ("통과", "미통과", "미실시"),
                 4: ("통과", "미통과", "미실시")}
+# 「무엇이 확인되면 인정되나」를 부르는 말. 서류를 받는 자리에 「응답」은 맞지 않는다.
+COVER_TITLE = {2: "이 서류로 확인되어야 할 것",
+               3: "응답에 담겨야 할 것",
+               4: "실기에서 확인할 것"}
 
 CSS = dash.CSS + """
 .steps{display:flex;gap:0;margin-bottom:20px;flex-wrap:wrap}
@@ -148,10 +152,10 @@ def _targets(it: Item) -> str:
     return f'<div class="tgts">{rows}</div>'
 
 
-def _must_cover(it: Item, ctx: ReviewContext) -> str:
-    """응답에 담겨야 할 것 — 대상 KSA 의 고시 원문 이름.
+def _must_cover(it: Item, ctx: ReviewContext, stage: int) -> str:
+    """무엇이 확인되면 인정되나 — 대상 KSA 의 고시 원문 이름.
 
-    AI 에게 다시 묻지 않는다. 이 항목이 채우기로 한 KSA 가 곧 「담겨야 할 것」이다.
+    AI 에게 다시 묻지 않는다. 이 항목이 채우기로 한 KSA 가 곧 그것이다.
     """
     seen: dict[str, str] = {}
     for t in it.targets:
@@ -163,7 +167,7 @@ def _must_cover(it: Item, ctx: ReviewContext) -> str:
     chips = "".join(
         f'<span><b>{e(pretty_ref(r))}</b>{" " + e(n) if n else ""}</span>'
         for r, n in seen.items())
-    return (f'<div class="blk2"><div class="t">응답에 담겨야 할 것 '
+    return (f'<div class="blk2"><div class="t">{e(COVER_TITLE[stage])} '
             f'— 이 {len(seen)}가지가 확인되면 인정됩니다</div>'
             f'<div class="must">{chips}</div></div>')
 
@@ -178,9 +182,10 @@ def _item_card(it: Item, ctx: ReviewContext, stage: int) -> str:
         body += f'<div class="blk2"><div class="t">왜 이 방법인가</div>{e(it.reason)}</div>'
     if it.oral_check:
         qs = "".join(f"<li>{e(q)}</li>" for q in it.oral_check)
-        body += (f'<div class="blk2"><div class="t">질문 {len(it.oral_check)}개</div>'
+        lbl = "실기 중 구술로 묻는 질문" if stage == 4 else "질문"
+        body += (f'<div class="blk2"><div class="t">{lbl} {len(it.oral_check)}개</div>'
                  f'<ol class="qs">{qs}</ol></div>')
-    body += _must_cover(it, ctx)
+    body += _must_cover(it, ctx, stage)
     body += f'<div class="blk2"><div class="t">이것이 풀리면 인정되는 것</div>{_targets(it)}</div>'
     if it.alt_document:
         body += (f'<div class="alt2">↳ 대체서류 제출 시 면제: {e(it.alt_document)}</div>')
@@ -251,6 +256,17 @@ def _stage_items(ctx: ReviewContext, stage: int) -> str:
 </div>{cards}"""
 
 
+def _where(o, ctx: ReviewContext) -> int:
+    """이 요소가 대기인 이유를 풀려면 몇 단계로 가야 하나."""
+    if o.reviewer_decision is None:
+        return 1
+    for st, method in ((2, "추가서류"), (3, "면접"), (4, "실기")):
+        for it in ctx.items.get(method) or []:
+            if not it.done and any(t["eid"] == o.element_id for t in it.targets):
+                return st
+    return 1
+
+
 def _stage_final(ctx: ReviewContext) -> str:
     got, tot = ctx.recognized_hours()
     oc = sorted(ctx.outcomes, key=lambda o: (-ctx.hours.get(o.unit_code, 0),
@@ -265,10 +281,18 @@ def _stage_final(ctx: ReviewContext) -> str:
             head = (f'<tr><td colspan="3" style="background:var(--s2);font-size:11.5px;'
                     f'color:var(--tm)">{e(o.unit)} · {ctx.hours.get(o.unit_code, 0)}시간</td></tr>')
         cls = {"인정": "ok", "미인정": "no"}.get(o.decision, "wait")
+        why = " · ".join(o.basis)
+        # 대기면 어디로 가야 풀리는지 짚어 준다. 「아직 판단하지 않았습니다」만
+        # 보고서는 어느 단계로 돌아가야 할지 알 수 없다.
+        go = ""
+        if o.decision == "대기":
+            where = _where(o, ctx)
+            go = (f' <a href="/assessments/{ctx.assessment_id}/review/{where}">'
+                  f'{where}단계에서 정하기 →</a>')
         rows += head + (
             f'<tr><td>{e(o.element)}</td>'
             f'<td><span class="tag2 {cls}">{e(o.decision)}</span></td>'
-            f'<td><span class="why">{e(" · ".join(o.basis))}</span></td></tr>')
+            f'<td><span class="why">{e(why)}{go}</span></td></tr>')
 
     waiting = ("<b>아직 정해지지 않은 것이 있습니다.</b> 앞 단계로 돌아가 마저 정하시면 "
                "이 표가 갱신됩니다." if n["대기"] else
