@@ -92,7 +92,12 @@ def run_track_a(s: Session, submission_id: int) -> int:
     rb = get_rubric()
     sub = s.execute(text("""
         SELECT id, case_number, target_program_id FROM submission WHERE id=:i"""),
-        {"i": submission_id}).mappings().one()
+        {"i": submission_id}).mappings().first()
+    if sub is None:
+        # 접수 건이 지워졌는데 큐에 작업이 남은 경우. 다시 시도해도 소용없다.
+        # `.one()` 이 내던 NoResultFound 는 PERMANENT 가 아니라서 영영 재시도했다
+        # — 워커를 띄울 때마다 오류 한 줄이 나왔다. build_package 와 같게 맞춘다.
+        raise LookupError(f"접수 건이 없습니다: submission_id={submission_id}")
 
     # 보유 자격 — document.doc_type='과정평가형자격' 의 issuer 에 자격명을 둔다
     qual_ids = [r[0] for r in s.execute(text("""

@@ -54,16 +54,26 @@ def fail(s: Session, job_id: int, error: str, attempts: int,
 
     permanent=True 면 재시도하지 않는다 — 대상이 사라졌거나 입력이 잘못된 경우,
     같은 작업을 세 번 더 돌려도 결과가 같다.
+
+    ## attempts 를 여기서 다시 쓴다
+
+    `dequeue` 가 attempts 를 올리지만 그것은 **핸들러와 같은 트랜잭션**이라,
+    핸들러가 터지면 롤백되어 되돌아간다. 그래서 DB 의 attempts 는 늘 0 이었고
+    `max_attempts` 가 죽은 설정이 되어 **실패한 작업이 영영 재시도**됐다.
+    실측: 다섯 번 돌려도 attempts=0.
+
+    호출자는 롤백 전에 읽어 둔 값을 넘겨 준다. 그 값을 여기서 적는다.
     """
     cfg = get_settings().queue
     if permanent or attempts >= cfg.max_attempts:
-        s.execute(text("UPDATE job SET status='failed', last_error=:e WHERE id=:i"),
-                  {"i": job_id, "e": error[:2000]})
+        s.execute(text("""UPDATE job SET status='failed', last_error=:e,
+                          attempts=:n WHERE id=:i"""),
+                  {"i": job_id, "e": error[:2000], "n": attempts})
         return "failed"
     delay = cfg.backoff_base_sec * (2 ** (attempts - 1))
-    s.execute(text("""UPDATE job SET status='queued', last_error=:e,
+    s.execute(text("""UPDATE job SET status='queued', last_error=:e, attempts=:n,
                       next_run_at = now() + make_interval(secs => :d) WHERE id=:i"""),
-              {"i": job_id, "e": error[:2000], "d": delay})
+              {"i": job_id, "e": error[:2000], "n": attempts, "d": delay})
     return "queued"
 
 
