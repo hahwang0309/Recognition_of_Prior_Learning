@@ -117,18 +117,25 @@ def _steps(ctx: ReviewContext, here: int) -> str:
     return f'<div class="steps">{out}</div>'
 
 
-def _dashboard(ctx: ReviewContext, *, live: bool) -> str:
+def _dashboard(ctx: ReviewContext) -> str:
+    """종합 현황 — 첫 단계부터 **결과 색**으로 그린다.
+
+    1단계에서 권고 색으로 그렸더니, 아무도 판단하지 않았는데 아래 막대는
+    「인정 190시간」이라고 말해 서로 어긋나 보였다. 이수 기록으로 확정된
+    요소는 시작부터 인정이므로 처음부터 그렇게 칠하는 것이 맞다.
+    기계가 낸 권고 분포는 Track B 보고서에 있다.
+    """
     units, cells, max_no = ctx.grid()
     got, tot = ctx.recognized_hours()
-    sub = (f"능력단위 {len(units)}개 · 요소 {ctx.n_elements}개 · 총 필수 {ctx.total_hours}시간"
-           + (f" · 지금까지 인정 {got}시간" if live else ""))
+    n_wait = sum(1 for v in ctx.outcome_of.values() if v == "대기")
+    sub = (f"능력단위 {len(units)}개 · 요소 {ctx.n_elements}개 · "
+           f"총 필수 {ctx.total_hours}시간 · 지금까지 인정 {got}시간")
     note = ("칸 색은 <b>지금까지 정해진 결과</b>입니다. 단계를 넘길 때마다 갱신됩니다."
-            if live else "칸 색은 기계가 낸 권고입니다.")
+            + (f" 회색 {n_wait}칸이 아직 정해지지 않았습니다." if n_wait else ""))
     return dash.render(
         title=f"{ctx.case_number} · {ctx.program_name}", sub=sub,
         units=units, cells=cells, max_no=max_no, n_elements=ctx.n_elements,
-        rec_counts=ctx.rec_counts,
-        outcome_of=ctx.outcome_of if live else None, note=note)
+        rec_counts=ctx.rec_counts, outcome_of=ctx.outcome_of, note=note)
 
 
 def _targets(it: Item) -> str:
@@ -312,7 +319,7 @@ def render_stage(ctx: ReviewContext, stage: int) -> str:
  <span style="color:var(--tm);font-size:12.5px">{e(hint)}</span></div>
 <p class="sub">{e(ctx.case_number)} · {e(ctx.program_name)}</p>
 
-{_dashboard(ctx, live=stage > 1 or ctx.n_judged > 0)}
+{_dashboard(ctx)}
 {_steps(ctx, stage)}
 {body}
 
