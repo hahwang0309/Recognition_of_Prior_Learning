@@ -11,12 +11,14 @@ from __future__ import annotations
 
 import html
 import json
+import re
 from datetime import datetime
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from krpl_core.config import get_rubric
+from services.catalog import label_of, labels, pretty_ref
 from services.review import BUCKETS, SETTLED, review_summary, split
 
 e = lambda x: html.escape(str(x) if x is not None else "")   # noqa: E731
@@ -28,6 +30,27 @@ REC = {"R0": ("r0", "기이수 인정검토", "이미 평가를 마친 항목 �
        "R4": ("r4", "추가서류 요청", "서류 보완 후 재판단"),
        "R5": ("r5", "미인정", "훈련 이수 필요")}
 CONF = {"high": "높음", "medium": "보통", "low": "낮음"}
+# 등급이 무엇을 뜻하는지 화면에 적는다. 「E등급」만 봐서는 알 수 없다.
+GRADE_KO = {"A": "공적증빙", "B": "기관발급", "C": "산출물·기록",
+            "D": "제3자진술", "E": "본인진술"}
+# 이수증 인용은 능력단위코드로 시작한다: 「1601050202_21v4 CO₂용접 도면 해독 60시간…」
+_CERT = re.compile(r"^\s*(\d{10})[_\s]\S*\s+(.+?)\s+\d+시간")
+
+
+def _same_text(a: str, b: str) -> bool:
+    """문장부호·공백만 다른 것은 같은 것으로 본다.
+
+    인용문이 원문 조각과 마침표 하나 차이인 경우가 흔하다. 그때 「문맥」
+    버튼을 내밀면 눌러도 같은 문장만 나와 헛걸음이 된다.
+    """
+    norm = lambda x: re.sub(r"[\s.。·,、]+", "", x or "")   # noqa: E731
+    return norm(a) == norm(b)
+
+
+def _cross_unit(quote: str, own_unit: str) -> str:
+    """이 인용이 **다른** 능력단위의 이수 기록이면 그 이름을 돌려준다."""
+    m = _CERT.match(quote or "")
+    return m.group(2).strip() if m and m.group(1) != own_unit else ""
 DEC = {"인정": "ok", "조건부인정": "cond", "불인정": "no", "보류": "hold"}
 
 CSS = """*{box-sizing:border-box}
@@ -107,11 +130,36 @@ details.grp>summary .st.ok{background:var(--ok);color:#fff}
 .why{font-size:12.8px;color:var(--ts);margin:0 0 9px}
 .blk{margin:9px 0}
 .blk>.t{font-size:11.3px;color:var(--tm);margin-bottom:4px}
-.ev{border-left:2px solid var(--bd);padding:2px 0 2px 11px;margin-bottom:7px}
-.ev .k{font-size:11.3px;color:var(--tm)}
-.ev .k b{color:var(--ts)}
-.ev q{display:block;font-size:12.8px;margin:2px 0;quotes:'"' '"'}
-.ev .r{font-size:11.8px;color:var(--ts)}
+/* 근거·미확보는 표로 본다. 세로로 쌓으면 「이 KSA 는 뭐로 채웠나」를
+   한눈에 볼 수 없다. 열은 넷까지만 — 더 넣으면 가로로 넘친다. */
+.et{width:100%;border-collapse:collapse;font-size:12.3px;table-layout:fixed}
+.et th{font-size:11px;color:var(--tm);font-weight:600;text-align:left;
+ padding:4px 8px;border-bottom:1px solid var(--bd);white-space:nowrap}
+.et td{padding:7px 8px;border-bottom:1px solid var(--bd);vertical-align:top}
+.et tr:last-child td{border-bottom:none}
+.et col.c1{width:23%}.et col.c2{width:auto}.et col.c3{width:19%}.et col.c4{width:62px}
+.et .ref{font-weight:600;color:var(--tp);white-space:nowrap}
+.et .lab{display:block;font-size:11.3px;color:var(--tm);line-height:1.4;
+ margin-top:1px;white-space:normal}
+/* CSS 유니코드 이스케이프를 파이썬 문자열에 쓰면 8진 이스케이프로 먹혀
+   제어문자가 된다. 실제로 화면에 「·C인용문·D」로 나왔다. 글자를 직접 쓴다. */
+.et q{quotes:'“' '”';font-size:12.5px;line-height:1.5}
+/* 판단 이유는 인용문 바로 아래 작게. 열을 늘리지 않고도 같이 읽힌다. */
+.et .why{display:block;font-size:11.4px;color:var(--tm);line-height:1.45;margin-top:3px}
+.et .why:before{content:'↳ ';opacity:.6}
+.et .doc{font-size:11.4px;color:var(--ts);line-height:1.4}
+.et .doc b{display:block;font-weight:600;color:var(--tp);font-size:11px}
+.et .xu{display:block;font-size:11px;color:var(--warn);margin-top:3px;line-height:1.35}
+.et .st2{font-size:11.4px;white-space:nowrap;font-weight:600}
+.et .st2.neg{color:var(--warn)}.et .st2.miss{color:var(--tm)}
+.et .none{color:var(--tm)}
+/* 표 안에서는 원문 칸이 통째로 펼쳐진다 */
+.et .orig{margin-top:0}
+@media(max-width:680px){
+ .et,.et thead,.et tbody,.et tr,.et td{display:block;width:100%}
+ .et thead{display:none}
+ .et tr{border:1px solid var(--bd);border-radius:8px;padding:8px 10px;margin-bottom:6px}
+ .et td{border:0;padding:2px 0}}
 .src{font-size:11.3px;color:var(--tm);cursor:pointer;text-decoration:underline dotted;
  background:none;border:0;padding:0;font-family:inherit}
 .src:hover{color:var(--tp)}
@@ -121,6 +169,8 @@ details.grp>summary .st.ok{background:var(--ok);color:#fff}
 .chips{display:flex;flex-wrap:wrap;gap:5px}
 .chip{font-size:11.3px;padding:1.5px 8px;border-radius:5px;background:var(--s3);color:var(--ts)}
 .chip.neg{color:var(--warn)}
+ul.oral{margin:3px 0 0;padding-left:16px;line-height:1.5}
+ul.oral li{margin-bottom:2px}
 .rem{font-size:12.5px;color:var(--ts);margin-bottom:4px}
 .rem b{color:var(--tp)}
 .rem .alt{color:var(--tm);font-size:11.5px}
@@ -174,25 +224,85 @@ footer{color:var(--tm);font-size:11.5px;border-top:1px solid var(--bd);padding-t
  .gb{margin-left:0;flex:1 1 100%}}"""
 
 
-def _evidence(ev: list[dict], frags: dict[str, str]) -> str:
-    out = ""
+def _evidence(ev: list[dict], frags: dict[str, str], eid: str,
+              lab: dict[tuple[str, str], str], own_unit: str,
+              dtypes: dict[str, str] | None = None) -> str:
+    """근거 표. KSA 번호에는 실제 레이블을 붙이고, 자료와 원문을 열로 나눈다."""
+    rows = ""
     for x in ev:
-        srcs = "".join(
-            f'<button class="src" onclick="og(this)" data-f="{e(f)}">{e(f)} 원문</button> '
-            for f in x.get("fids") or [])
-        origs = "".join(f'<div class="orig" data-f="{e(f)}">{e(frags.get(f, "(원문 없음)"))}</div>'
-                        for f in x.get("fids") or [])
-        out += f"""<div class="ev">
- <div class="k"><b>{e(x.get('ksa_ref'))}</b> · 신뢰도 {e(x.get('grade'))}등급 · {srcs}</div>
- <q>{e(x.get('quote'))}</q>
- <div class="r">{e(x.get('why'))}</div>{origs}</div>"""
-    return out
+        ref = x.get("ksa_ref") or ""
+        label = label_of(lab, eid, ref)
+        g = (x.get("grade") or "").strip().upper()[:1]
+        fids = [f for f in (x.get("fids") or []) if f]
+
+        # 원문은 인용문과 **다를 때만** 내민다. 글자 단위로 같은 것이 46% 였고,
+        # 눌러 봐야 같은 문장만 나와 헛걸음이 된다.
+        quote = (x.get("quote") or "").strip()
+        extra = [f for f in fids
+                 if (frags.get(f) or "").strip()
+                 and not _same_text(frags.get(f), quote)]
+        btn = "".join(
+            f'<button class="src" onclick="og(this)" data-f="{e(f)}">문맥</button> '
+            for f in extra) or '<span class="none">—</span>'
+        origs = "".join(
+            f'<div class="orig" data-f="{e(f)}">{e(frags.get(f, "(원문 없음)"))}</div>'
+            for f in extra)
+
+        # 다른 능력단위의 이수 기록으로 뒷받침한 것은 드러낸다.
+        # 「다른 과목을 들었으니 이 과목 지식도 있을 것」이라는 논리라 타당할 수도,
+        # 아닐 수도 있다. 판단은 심사위원 몫이지만 모르고 지나쳐서는 안 된다.
+        cross = _cross_unit(quote, own_unit)
+        xu = (f'<span class="xu">⚠ 다른 능력단위({e(cross)}) 이수 기록</span>'
+              if cross else "")
+
+        dtypes = dtypes or {}
+        kinds = list(dict.fromkeys(d for f in fids if (d := dtypes.get(f))))
+        src = " · ".join(kinds) + (" · " if kinds else "") + ", ".join(fids)
+        rows += (f'<tr><td><span class="ref">{e(pretty_ref(ref))}</span>'
+                 f'<span class="lab">{e(label) or "&nbsp;"}</span></td>'
+                 f'<td><q>{e(quote)}</q>'
+                 + (f'<span class="why">{e(x.get("why"))}</span>' if x.get("why") else "")
+                 + f'</td><td class="doc">{GRADE_KO.get(g, g) or "—"}'
+                 + (f'<b>{e(g)} 등급</b>' if g else "")
+                 + f'{xu}<span class="lab">{e(src)}</span></td>'
+                 f'<td>{btn}{origs}</td></tr>')
+    return (f'<table class="et"><colgroup><col class="c1"><col class="c2">'
+            f'<col class="c3"><col class="c4"></colgroup>'
+            f'<thead><tr><th>KSA</th><th>근거 인용문</th><th>자료</th><th>원문</th></tr></thead>'
+            f'<tbody>{rows}</tbody></table>')
+
+
+def _uncovered(unc: list, eid: str, lab: dict[tuple[str, str], str]) -> str:
+    """확인 안 된 항목 표. 번호만 적으면 무엇이 비었는지 알 수 없다.
+
+    AI 가 남긴 `note`(왜 비었는지)를 통째로 버리고 있었다. 그것이 정작
+    심사위원이 알아야 할 내용이다.
+    """
+    rows = ""
+    for u in unc:
+        ref = (u.get("ref") if isinstance(u, dict) else str(u)) or ""
+        status = (u.get("status") if isinstance(u, dict) else "") or "미확보"
+        note = (u.get("note") if isinstance(u, dict) else "") or ""
+        cls = "neg" if status == "부정진술" else "miss"
+        rows += (f'<tr><td><span class="ref">{e(pretty_ref(ref))}</span>'
+                 f'<span class="lab">{e(label_of(lab, eid, ref)) or "&nbsp;"}</span></td>'
+                 f'<td>{e(note) if note else "<span class=none>—</span>"}</td>'
+                 f'<td><span class="st2 {cls}">{e(status)}</span></td></tr>')
+    return (f'<table class="et"><colgroup><col class="c1"><col class="c2">'
+            f'<col class="c3"></colgroup>'
+            f'<thead><tr><th>KSA</th><th>왜 비어 있나</th><th>구분</th></tr></thead>'
+            f'<tbody>{rows}</tbody></table>')
 
 
 def _element(x: dict, frags: dict[str, str], rv: dict, names: dict[str, str],
-             units: dict[str, str] | None = None) -> str:
-    units = units or {}
+             units: dict[str, str] | None = None,
+             lab: dict[tuple[str, str], str] | None = None,
+             hours: dict[str, int] | None = None,
+             dtypes: dict[str, str] | None = None) -> str:
+    units, lab, hours = units or {}, lab or {}, hours or {}
+    dtypes = dtypes or {}
     p = x["payload"]
+    own_unit = x["element_id"].split("_")[0]
     cls, label, hint = REC.get(x["recommendation"], ("r5", x["recommendation"], ""))
     flag = ('<span class="flag">전문가 확인 필요</span>'
             if p.get("needs_expert_review") else "")
@@ -200,12 +310,16 @@ def _element(x: dict, frags: dict[str, str], rv: dict, names: dict[str, str],
 
     body = ""
     if ev := p.get("evidence"):
-        body += f'<div class="blk"><div class="t">근거 {len(ev)}건</div>{_evidence(ev, frags)}</div>'
+        body += (f'<div class="blk"><div class="t">근거 {len(ev)}건'
+                 + (f' · 기준 KSA {len(ev) + len(p.get("uncovered_ksa") or [])}개 가운데'
+                    if p.get("uncovered_ksa") else '')
+                 + f'</div>{_evidence(ev, frags, x["element_id"], lab, own_unit, dtypes)}</div>')
 
     pb = p.get("period_backing") or {}
     if pb.get("note"):
-        g = "·".join(pb.get("grades") or []) or "없음"
-        body += (f'<div class="blk"><div class="t">소속·기간 뒷받침 ({e(g)}등급)</div>'
+        gs = pb.get("grades") or []
+        g = " · ".join(f"{x} {GRADE_KO.get(x, '')}".strip() for x in gs) or "없음"
+        body += (f'<div class="blk"><div class="t">소속·기간 뒷받침 — {e(g)}</div>'
                  f'<div class="rem">{e(pb["note"])}</div></div>')
 
     pl = p.get("prior_learning") or {}
@@ -221,18 +335,18 @@ def _element(x: dict, frags: dict[str, str], rv: dict, names: dict[str, str],
         body += f'<div class="blk"><div class="t">본인이 「하지 않았다」고 밝힌 부분</div>{items}</div>'
 
     if unc := p.get("uncovered_ksa"):
-        chips = "".join(
-            f'<span class="chip{" neg" if u.get("status") == "부정진술" else ""}">'
-            f'{e(u.get("ref"))} · {e(u.get("status"))}</span>' for u in unc)
-        body += f'<div class="blk"><div class="t">확인 안 된 항목 {len(unc)}개</div><div class="chips">{chips}</div></div>'
+        body += (f'<div class="blk"><div class="t">확인 안 된 항목 {len(unc)}개 — '
+                 f'「부정진술」은 본인이 하지 않았다고 밝힌 것, 「미확보」는 자료가 '
+                 f'없는 것입니다</div>{_uncovered(unc, x["element_id"], lab)}</div>')
 
     if rem := p.get("remediation"):
         items = ""
         for r in rem:
             oral = ""
             if r.get("oral_check"):
-                oral = ('<br><span class="alt">구술 확인: '
-                        + e(" / ".join(r["oral_check"])) + "</span>")
+                # 질문 서넛이 「 / 」로 이어지면 한 덩어리로 보여 읽히지 않는다.
+                qs = "".join(f"<li>{e(q)}</li>" for q in r["oral_check"])
+                oral = f'<div class="alt">구술 확인<ul class="oral">{qs}</ul></div>' 
             alt = (f'<br><span class="alt">이 서류를 내면 갈음: {e(r["alt_document"])}</span>'
                    if r.get("alt_document") else "")
             items += (f'<div class="rem"><b>{e(r.get("method"))}</b> — {e(r.get("item"))}'
@@ -271,6 +385,13 @@ def _element(x: dict, frags: dict[str, str], rv: dict, names: dict[str, str],
         marks += '<span class="mk rule">기록으로 확정</span>'
     n_ev = len(p.get("evidence") or [])
     n_un = len(p.get("uncovered_ksa") or [])
+    h = hours.get(own_unit)
+    if h:
+        unit = f"{unit} · {h}시간" if unit else f"{h}시간"
+    n_cross = sum(1 for v in (p.get("evidence") or [])
+                  if _cross_unit(v.get("quote") or "", own_unit))
+    if n_cross:
+        marks += f'<span class="mk cf">타단위 근거 {n_cross}건</span>' 
 
     return f"""<div class="el{' done' if cur else ''}" id="el-{e(eid)}"
      data-rec="{e(x['recommendation'])}" data-by="{e(p.get('decided_by') or 'ai')}">
@@ -310,6 +431,9 @@ def render_review(s: Session, assessment_id: int) -> str:
         WHERE assessment_id=:i ORDER BY element_id"""), {"i": assessment_id}).mappings()]
     frags = {r[0]: r[1] for r in s.execute(text(
         "SELECT fid, text FROM fragment WHERE submission_id=:i"), {"i": a["sid"]})}
+    # fid 만으로는 무슨 서류인지 알 수 없다. 「D07-S03」보다 「경력기술서」가 낫다.
+    dtypes = {r[0]: r[1] for r in s.execute(text(
+        "SELECT fid, doc_type FROM fragment WHERE submission_id=:i"), {"i": a["sid"]})}
     # 요소 이름은 고시 원문에서 가져온다 — AI 가 적어 준 값보다 이쪽이 옳다
     names = {r[0]: r[1] for r in s.execute(text("""
         SELECT element_id, element_name FROM catalog_ncs_element
@@ -323,6 +447,12 @@ def render_review(s: Session, assessment_id: int) -> str:
 
     sm = review_summary(s, assessment_id)
     unit_names = {u.unit_code: u.unit_name for u in sm.units}
+    # 「기술1」이 무슨 기술인지. 번호만 적으면 무엇이 비었는지 알 수 없다.
+    lab = labels(s, [x["element_id"] for x in els])
+    # 이 판단이 몇 시간짜리인지. 경중을 가릴 근거가 화면에 있어야 한다.
+    unit_hours = {r[0]: r[1] for r in s.execute(text("""
+        SELECT unit_code, required_hours FROM catalog_wsd_required
+        WHERE program_id=:p"""), {"p": a["target_program_id"]})}
     note = json.loads(a["overall_note"]) if a["overall_note"] else {}
 
     # 능력단위 순서가 아니라 **손이 가는 정도**로 묶는다.
@@ -343,7 +473,8 @@ def render_review(s: Session, assessment_id: int) -> str:
             f'<button class="sm" data-d="{d}" onclick="bulk(this)">'
             f'{d} {len(items)}개</button>'
             for d in (("인정",) if key == SETTLED else ("인정", "조건부인정")))
-        cards = "".join(_element(x, frags, rv, names, unit_names) for x in
+        cards = "".join(
+            _element(x, frags, rv, names, unit_names, lab, unit_hours, dtypes) for x in
                         sorted(items, key=lambda y: (y["recommendation"], y["element_id"])))
         secs += f'''<details class="grp" {"open" if open_ else ""} data-k="{key}">
  <summary><span class="st {badge}">{e(title)}</span>

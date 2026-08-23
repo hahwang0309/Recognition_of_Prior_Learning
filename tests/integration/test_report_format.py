@@ -81,6 +81,9 @@ TRACK_B = {
     "대체서류 안내": '<div class="alt">↳ 대체서류 제출 시 면제:',
     "요소 카드": re.compile(r'<details class="el r\d"><summary><span class="badge r\d"><i>.</i>R\d</span>', re.S),
     "증거 인용": '<blockquote>',
+    # 원본은 .kt 칸에 KSA 이름을 넣는다. 내가 판단 이유를 잘라 넣고 있었다.
+    "증거 머리 KSA 이름": re.compile(
+        r'<div class="evh"><b>(?:기술|지식|태도)\d+</b> <span class="kt">[^<]+</span>'),
     "소속·기간 보증": '<div class="pb"><b>소속·기간 보증</b>',
     "증명·비어있음": '<p class="dims"><b>증명됨</b>',
     "제출 문서 표": '<table class="docs">',

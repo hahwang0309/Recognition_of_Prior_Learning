@@ -21,6 +21,9 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from services.catalog import label_of, labels
+from services.report.layout import page
+
 e = lambda x: html.escape(str(x) if x is not None else "")   # noqa: E731
 
 # 권고 → (class, 아이콘, 이름, 부연). 원본의 아이콘·색을 그대로 쓴다.
@@ -179,12 +182,14 @@ def _heatmap(units: list[dict], cells: dict[tuple[str, int], dict], max_no: int)
             f'</thead><tbody>{body}</tbody></table></div>')
 
 
-def _plan(els: list[dict]) -> tuple[str, dict[str, int]]:
+def _plan(els: list[dict], lab: dict[tuple[str, str], str] | None = None
+          ) -> tuple[str, dict[str, int]]:
     """Ⅱ. 보완계획 — 같은 항목은 병합해 대상 요소와 KSA 를 모은다.
 
     같은 「안전보건교육 이수확인서 한 건」이 요소 열 곳에 걸리는 일이 흔하다.
     요소마다 따로 적으면 지원자가 열 번 준비해야 하는 것처럼 보인다.
     """
+    lab = lab or {}
     groups: dict[str, dict[str, dict]] = {m: {} for m, *_ in PLAN}
     for x in els:
         for r in x["payload"].get("remediation") or []:
@@ -201,6 +206,7 @@ def _plan(els: list[dict]) -> tuple[str, dict[str, int]]:
             if not g["alt"] and r.get("alt_document"):
                 g["alt"] = r["alt_document"]
             g["targets"].append({"unit": x["_un"], "el": x["_en"],
+                                 "eid": x["element_id"],
                                  "ksa": r.get("ksa_refs") or []})
 
     counts = {m: len(v) for m, v in groups.items()}
@@ -224,8 +230,13 @@ def _plan(els: list[dict]) -> tuple[str, dict[str, int]]:
             tg = ""
             for t in g["targets"][:6]:
                 ksa = "·".join(t["ksa"])
+                # 확정 포맷은 이 칸에 번호만 넣는다(폭이 좁다). 이름은 툴팁으로
+                # 붙인다 — 「지식5」만 봐서는 무엇을 채우라는 것인지 알 수 없다.
+                names = " · ".join(
+                    f"{r} {n}" for r in t["ksa"]
+                    if (n := label_of(lab, t.get("eid", ""), r)))
                 tg += (f'<span class="tg">{e(t["unit"])} › {e(t["el"])}</span> '
-                       f'<span class="kr">{e(ksa)}</span><br>')
+                       f'<span class="kr" title="{e(names)}">{e(ksa)}</span><br>')
             if len(g["targets"]) > 6:
                 tg += f'<div class="more">외 {len(g["targets"]) - 6}개 요소</div>'
             alt = (f'<div class="alt">↳ 대체서류 제출 시 면제: {e(g["alt"])}</div>'
@@ -243,9 +254,11 @@ def _plan(els: list[dict]) -> tuple[str, dict[str, int]]:
     return out, counts
 
 
-def _element(x: dict, frags: dict[str, str]) -> str:
+def _element(x: dict, frags: dict[str, str],
+             lab: dict[tuple[str, str], str] | None = None) -> str:
     """Ⅲ. 요소 하나 — 원본의 details.el 구조 그대로."""
-    p = x["payload"]
+    p, lab = x["payload"], lab or {}
+    eid = x["element_id"]
     cls, ico, name, _ = REC[x["recommendation"]]
     n_ksa_all = len(p.get("uncovered_ksa") or []) + len(p.get("evidence") or [])
     meta = " · ".join(filter(None, [
@@ -277,8 +290,9 @@ def _element(x: dict, frags: dict[str, str]) -> str:
             g = (v.get("grade") or "").strip().upper()[:1]
             fids = ",".join(v.get("fids") or [])
             doc = next((frags.get(f) for f in (v.get("fids") or []) if frags.get(f)), "")
-            b += (f'<div class="ev"><div class="evh"><b>{e(v.get("ksa_ref"))}</b> '
-                  f'<span class="kt">{e(v.get("why") or "")[:40]}</span>'
+            ref = v.get("ksa_ref") or ""
+            b += (f'<div class="ev"><div class="evh"><b>{e(ref)}</b> '
+                  f'<span class="kt">{e(label_of(lab, eid, ref))}</span>'
                   f'<span class="src g{g}">{e(g)}{" · " + e(doc) if doc else ""}'
                   f'{" · " + e(fids) if fids else ""}</span></div>'
                   f'<blockquote>{e(v.get("quote"))}</blockquote>'
@@ -350,6 +364,8 @@ def render_evidence(s: Session, assessment_id: int) -> str:
     hours = {r[0]: r[1] for r in s.execute(text("""
         SELECT unit_code, required_hours FROM catalog_wsd_required
         WHERE program_id=:p"""), {"p": a["target_program_id"]})}
+    # 「기술1」이 무슨 기술인지. 원본 확정본도 .kt 칸에 이 이름을 넣는다.
+    lab = labels(s, [x["element_id"] for x in els])
     docs = [dict(r) for r in s.execute(text("""
         SELECT doc_type, grade, issuer, issued_on FROM document
         WHERE submission_id=:i ORDER BY grade, doc_key"""), {"i": sid}).mappings()]
@@ -394,11 +410,11 @@ def render_evidence(s: Session, assessment_id: int) -> str:
         f'<td>{e(d["issuer"] or "—")}</td>'
         f'<td class="c">{d["issued_on"] or "—"}</td></tr>' for d in docs)
 
-    plan_html, _ = _plan(els)
+    plan_html, _ = _plan(els, lab)
 
     detail = ""
     for u in ordered:
-        cards = "".join(_element(x, frags) for x in
+        cards = "".join(_element(x, frags, lab) for x in
                         sorted(u["els"], key=lambda z: z["element_id"]))
         detail += (f'<div class="ug"><h4>{e(u["name"])} '
                    f'<small>{u["hours"]}시간 · 요소 {len(u["els"])}개</small></h4>{cards}</div>')
