@@ -363,3 +363,55 @@ def test_warnings_are_not_flashed_past():
         assert "그래도 계속" in h, "경고를 읽은 뒤 갈 길이 없다"
     finally:
         _drop(case)
+
+
+# ── 서류 종류 자동 매칭 ───────────────────────────────────────────
+
+def test_guess_endpoint_answers_for_every_name():
+    c = _client()
+    names = ["01_NCS기반_훈련과정_이수증.hwpx", "09_경력기술서.txt", "스캔0001.pdf"]
+    r = c.post("/doc-types/guess", json={"names": names})
+    assert r.status_code == 200
+    d = r.json()
+    assert [x["name"] for x in d] == names, "보낸 순서대로 돌려줘야 한다"
+    assert d[0]["doc_type"] == "NCS기반_훈련이수증" and d[0]["grade"] == "B"
+    assert d[0]["matched"], "무엇에 걸렸는지 말해야 한다"
+    assert d[2]["doc_type"] is None, "못 맞히면 비운다"
+
+
+def test_guess_endpoint_handles_an_empty_list():
+    assert _client().post("/doc-types/guess", json={"names": []}).json() == []
+
+
+def test_upload_screen_asks_the_server_and_never_guesses_on_its_own():
+    """판별은 서버 한 곳에만 둔다 — 화면에도 같은 규칙을 두면 곧 갈라진다."""
+    case = "R2026-9094"
+    _drop(case)
+    c = _client()
+    try:
+        sid = c.post("/submissions", json={
+            "case_number": case, "track": "B",
+            "target_program_id": "양식조리_L4", "qualifications": []}).json()["id"]
+        h = c.get(f"/submissions/{sid}/upload").text
+        assert "/doc-types/guess" in h, "화면이 판별을 물어보지 않는다"
+        # 못 맞힌 것은 비워 두고, 목록 첫 항목을 조용히 넣지 않는다
+        assert '<option value="">— 고르세요 —</option>' in h
+        assert "Object.keys(DEFAULT_GRADE)[0]" not in h, \
+            "아직 첫 항목을 기본값으로 넣는 자리가 남아 있다"
+        # 종류를 못 정한 파일이 있으면 올리지 못한다
+        assert "종류를 고르세요 (${left}건 남음)" in h
+        assert "left > 0" in h
+    finally:
+        _drop(case)
+
+
+def test_the_whole_real_set_is_guessed_correctly():
+    """접수목록.csv 가 정답이다. 담당자가 하나도 안 고쳐도 되어야 한다."""
+    if not (SRC / "접수목록.csv").exists():
+        pytest.skip("test/candidate01 이 없다")
+    _, docs = load_candidate.read_set(SRC)
+    names = [Path(d["file_path"]).name for d in docs]
+    got = _client().post("/doc-types/guess", json={"names": names}).json()
+    wrong = [(n, g["doc_type"], d["doc_type"])
+             for n, g, d in zip(names, got, docs) if g["doc_type"] != d["doc_type"]]
+    assert not wrong, f"자동 매칭이 접수목록과 어긋난다: {wrong}"

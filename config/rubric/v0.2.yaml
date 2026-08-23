@@ -28,48 +28,60 @@ dimensions: [신원, 소속·기간, 직무명, 수행내용, 역량수준, 최�
 document_types:
   국가기술자격증:
     grade: A
+    aliases: [국가기술자격, 기술자격증, 자격증, 자격수첩, 기능사, 산업기사, 기사자격, 기술사]
     proves: {신원: full, 직무명: full, 수행내용: partial, 역량수준: full, 최신성: partial}
     note: 국가가 역량을 평가한 자료 — 제Ⅱ장 원칙의 예외
   학위·성적증명서:
     grade: A
+    aliases: [성적증명, 학위증명, 졸업증명, 성적표, 학위기, 졸업장, 재학증명]
     proves: {신원: full, 소속·기간: full, 직무명: full, 수행내용: partial, 역량수준: partial, 최신성: partial}
     note: 교과목명만으로는 능력단위 대응 불확실 — 편성표 필요
   4대보험_가입내역:
     grade: A
+    aliases: [4대보험, 사대보험, 자격득실, 국민연금, 건강보험, 고용보험, 가입내역, 가입증명]
     proves: {신원: full, 소속·기간: full, 최신성: full}
     note: 기간 확정에 가장 유용
   경력증명서:
     grade: B
+    aliases: [경력증명, 재직증명, 근무경력, 경력확인]
     proves: {신원: full, 소속·기간: full, 직무명: full, 수행내용: partial, 최신성: full}
   NCS기반_훈련이수증:
     grade: B
+    aliases: [ncs기반훈련이수증, ncs훈련이수증, 훈련과정이수증, 훈련이수증, ncs이수증, 훈련수료증, 직업훈련이수]
     time_source: true
     proves: {신원: full, 소속·기간: full, 직무명: full, 수행내용: full, 역량수준: full, 최신성: full}
     requires: [능력단위코드, 이수시간, 내부평가결과]
     note: 내부평가 합격이 확인될 때만 역량수준 인정 → R0 대상
   교육과정_편성표:
     grade: B
+    aliases: [교육과정편성표, 편성표, 교과편성, 교육과정표]
     time_source: true
     proves: {직무명: full, 수행내용: full}
     note: 교과목↔능력단위 대응만 증명. 평가결과는 증명 못 함
   사내·기관_교육이수내역:
     grade: B
+    aliases: [사내교육, 기관교육, 교육이수내역, 사내연수, 직무교육]
     proves: {신원: full, 소속·기간: full, 수행내용: partial, 최신성: partial}
   비NCS_교육수료증:
     grade: B
+    aliases: [비ncs교육수료증, 교육수료증, 수료증, 연수수료]
     proves: {신원: full, 소속·기간: full, 수행내용: partial, 최신성: partial}
     note: 능력단위 대응 정보 없음 → R0 불가
   작업일지·업무일지:
     grade: C
+    aliases: [작업일지, 업무일지, 주방일지, 사육일지, 운영일지, 일지, 작업기록]
     proves: {소속·기간: partial, 직무명: full, 수행내용: full, 역량수준: partial, 최신성: full}
   포트폴리오·산출물:
     grade: C
+    aliases: [포트폴리오, 산출물, 결과물, 작품집, 사진첩]
     proves: {수행내용: full, 역량수준: full, 최신성: partial}
   제3자_확인서:
     grade: D
+    aliases: [확인서, 추천서, 소견서, 진술서, 증언]
     proves: {소속·기간: partial, 직무명: full, 수행내용: partial, 역량수준: partial, 최신성: partial}
   경력기술서·자기소개서:
     grade: E
+    aliases: [경력기술, 자기소개, 자소서, 예비답변, 면접답변, 본인진술]
     proves: {소속·기간: partial, 직무명: full, 수행내용: full, 역량수준: partial}
 
 # ── 권고 구분 ──────────────────────────────────────────────────

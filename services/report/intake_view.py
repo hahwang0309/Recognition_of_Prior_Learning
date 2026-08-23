@@ -46,6 +46,11 @@ CSS = """
 .f select{padding:4px 8px;font-size:12px}
 .f .x{border:0;background:none;color:var(--tm);font-size:16px;padding:0}
 .f .x:hover{color:var(--no)}
+/* 이름으로 못 맞힌 줄. 담당자가 반드시 손대야 하는 곳이라 눈에 띄어야 한다. */
+.f.ask{border-color:var(--wn);background:rgba(250,178,25,.09)}
+.f.ask .nm small{color:#a06f00}
+.f.ask select:first-of-type{border-color:var(--wn)}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]) .f.ask .nm small{color:var(--wn)}}
 @media(max-width:680px){.f{grid-template-columns:1fr;gap:5px}}
 """
 
@@ -173,8 +178,11 @@ def render_upload(sub: dict, doc_types: list[dict], grades: list[str],
                   existing: list[dict], env: str, *,
                   accept: list[str] | None = None, max_mb: int = 50) -> str:
     """문서 업로드 — 서류마다 종류와 신뢰도 등급을 지정한다."""
-    opts = "".join(f'<option value="{e(d["name"])}">{e(d["name"])} '
-                   f'({e(d["grade"])}등급)</option>' for d in doc_types)
+    # 못 맞힌 파일은 비워 둔다 — 목록의 첫 항목을 조용히 넣어 두면
+    # 담당자가 그대로 두는 순간 자기소개서가 공적증빙 A등급으로 들어간다.
+    opts = ('<option value="">— 고르세요 —</option>'
+            + "".join(f'<option value="{e(d["name"])}">{e(d["name"])} '
+                      f'({e(d["grade"])}등급)</option>' for d in doc_types))
     gopts = "".join(f'<option value="{g}">{g}</option>' for g in grades)
     rows = "".join(f"""<tr><td>{e(d['doc_key'])}</td><td>{e(d['doc_type'])}</td>
         <td>{e(d['grade'])}</td><td>{e(d['issuer'] or '')}</td>
@@ -219,9 +227,11 @@ let files = [];
 
 function draw() {{
   $('files').innerHTML = files.map((f, i) => `
-    <div class="f">
+    <div class="f${{f.type ? '' : ' ask'}}">
       <span class="k">D${{String(START + i + 1).padStart(2, '0')}}</span>
-      <span class="nm">${{f.file.name}}<small>${{(f.file.size / 1024).toFixed(0)}}KB</small></span>
+      <span class="nm">${{f.file.name}}<small>${{(f.file.size / 1024).toFixed(0)}}KB${{
+        f.matched ? ` · 「${{f.matched}}」 로 봄` : (f.type ? '' : ' · 종류를 고르세요')
+      }}</small></span>
       <select onchange="setType(${{i}}, this.value)">${{OPTS}}</select>
       <select onchange="files[${{i}}].grade=this.value">${{GOPTS}}</select>
       <button class="x" onclick="files.splice(${{i}},1);draw()">×</button>
@@ -230,18 +240,38 @@ function draw() {{
     const s = $('files').children[i].querySelectorAll('select');
     s[0].value = f.type; s[1].value = f.grade;
   }});
-  $('up').disabled = !files.length;
+  // 종류를 못 정한 파일이 있으면 올리지 않는다. 잘못 들어가면 되돌리기 어렵다.
+  const left = files.filter(f => !f.type).length;
+  $('up').disabled = !files.length || left > 0;
+  $('up').textContent = left ? `종류를 고르세요 (${{left}}건 남음)` : '서류 수집하기';
 }}
 function setType(i, v) {{
   files[i].type = v;
   files[i].grade = DEFAULT_GRADE[v] || 'C';
+  files[i].matched = '';        // 사람이 고쳤다 — 더는 기계가 본 것이 아니다
   draw();
 }}
-function add(list) {{
-  for (const file of list) {{
-    const t = Object.keys(DEFAULT_GRADE)[0];
-    files.push({{file, type: t, grade: DEFAULT_GRADE[t]}});
-  }}
+async function add(list) {{
+  const fresh = [...list].map(file => ({{file, type: '', grade: 'C', matched: ''}}));
+  files.push(...fresh);
+  draw();
+  // 이름으로 종류를 알아맞힌다. 판별은 서버 한 곳에만 둔다 —
+  // 화면에도 같은 규칙을 두면 곧 갈라진다.
+  try {{
+    const r = await fetch('/doc-types/guess', {{
+      method: 'POST', headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{names: fresh.map(f => f.file.name)}})}});
+    if (r.ok) {{
+      const g = await r.json();
+      fresh.forEach((f, i) => {{
+        if (g[i] && g[i].doc_type) {{
+          f.type = g[i].doc_type;
+          f.grade = g[i].grade || DEFAULT_GRADE[g[i].doc_type] || 'C';
+          f.matched = g[i].matched || '';
+        }}
+      }});
+    }}
+  }} catch (e) {{ /* 못 맞히면 사람이 고른다 */ }}
   draw();
 }}
 

@@ -13,6 +13,7 @@ from krpl_core.db import get_session
 from krpl_core.queue import enqueue, stats, stuck, worker_alive
 from services.catalog import CatalogRepo
 from services.ingest import UploadRejected, ingest_submission, store
+from services.ingest.classify import guess_many
 from krpl_core.audit import AuditStore, read_artifact
 from datetime import datetime
 
@@ -31,6 +32,7 @@ from services.gateway.schemas import (
     DecisionOut,
     ElementOut, ElementReviewIn, ElementReviewOut, FragmentOut, IngestOut,
     IngestRequest, ProgramOut, RecommendOut, ReviewSummaryOut, SubmissionCreate,
+    GuessIn, GuessOut,
     RemediationIn, RemediationOut,
     SubmissionOut, TrackBAssessmentOut, TrackBElementOut, ValidationAttemptOut,
 )
@@ -712,3 +714,17 @@ def record_remediation(aid: int, body: RemediationIn,
         stamp=f"{body.reviewer or '심사자'} {datetime.now():%Y-%m-%d}",
         recognized_hours=got, total_hours=tot,
         n_recognized=sum(1 for v in fresh.outcome_of.values() if v == "인정"))
+
+
+@app.post("/doc-types/guess", response_model=list[GuessOut])
+def guess_doc_types(body: GuessIn):
+    """파일 이름으로 서류 종류를 알아맞힌다.
+
+    담당자가 파일 열한 개의 종류를 하나씩 고르는 것은 지루하고, 지루하면
+    대충 고른다. 이름은 대개 정직하다 — 거기서 읽어 낸다.
+    못 맞히면 비워서 돌려준다. 틀리게 맞히는 것보다 낫다.
+
+    파일 이름만 받는다 — 내용은 올리기 전이라 아직 없다.
+    """
+    return [GuessOut(name=n, doc_type=g.doc_type, grade=g.grade, matched=g.matched)
+            for n, g in zip(body.names, guess_many(body.names))]

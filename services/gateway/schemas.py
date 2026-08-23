@@ -255,3 +255,15 @@ class RemediationOut(BaseModel):
     recognized_hours: int
     total_hours: int
     n_recognized: int
+
+
+class GuessIn(BaseModel):
+    """파일 이름만 보낸다. 파일 자체는 아직 올리지 않는다."""
+    names: list[str] = Field(max_length=200)
+
+
+class GuessOut(BaseModel):
+    name: str
+    doc_type: str | None = None
+    grade: str | None = None
+    matched: str = ""      # 어느 말에 걸렸는지 — 왜 그렇게 봤는지 보여 준다
