@@ -45,6 +45,18 @@ tr:hover td{background:var(--s2)}
 .facts{font-size:12.8px;color:var(--ts);margin:5px 0 9px}
 .facts b{color:var(--tp);font-variant-numeric:tabular-nums}
 .arts{display:grid;gap:5px}
+details.run{border:1px solid var(--bd);border-radius:11px;margin-bottom:14px;
+ background:var(--s1);overflow:hidden}
+details.run>summary{cursor:pointer;padding:11px 15px;background:var(--s2);
+ display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;font-size:13.5px}
+details.run>summary::-webkit-details-marker{display:none}
+details.run>summary:before{content:'▸';color:var(--tm);margin-right:2px}
+details.run[open]>summary:before{content:'▾'}
+details.run .rtag{font-size:11px;padding:1.5px 8px;border-radius:10px;
+ background:var(--s3);color:var(--ts)}
+details.run .rn{margin-left:auto;font-size:11.5px;color:var(--tm)}
+details.run>.stage{margin:0;padding:12px 15px;border-top:1px solid var(--bd)}
+.note.warn2{border-left:3px solid var(--wn)}
 .art{display:grid;grid-template-columns:1fr auto auto auto;gap:11px;align-items:center;
  background:var(--s1);border:1px solid var(--bd);border-radius:7px;padding:7px 11px;font-size:12.3px}
 .art .nm b{font-size:12.8px}
@@ -160,7 +172,10 @@ def _facts(s: Session, sub, aid: int | None) -> dict[str, str]:
     pk = note.get("package") or {}
     f["package"] = (f"능력단위 <b>{pk.get('n_units', '?')}</b>개 · 요소 <b>{pk.get('n_elements', '?')}</b>개 ·"
                     f" KSA <b>{pk.get('n_ksa', '?')}</b>개와 조각 <b>{pk.get('n_fragments', '?')}</b>개를"
-                    f" 한 덩어리로 묶어 보냈습니다. 입력 지문 {e(a['input_hash'][:16])}…")
+                    f" 한 덩어리로 묶어 보냈습니다."
+                    # 입력 지문은 판정이 끝까지 갔을 때만 남는다. 없다고 화면이
+                    # 죽으면 정작 무엇이 잘못됐는지 볼 수 없다.
+                    + (f" 입력 지문 {e(a['input_hash'][:16])}…" if a["input_hash"] else ""))
     f["llm"] = (f"{e(a['model'])} · 지침 {e(a['prompt_version'])} · 기준 v{e(a['rubric_version'])}"
                 f" · <b>{a['attempts']}</b>회 시도"
                 + (f" · 토큰 입력 {a['input_tokens']:,} 출력 {a['output_tokens']:,}"
@@ -205,24 +220,73 @@ def render_audit_case(s: Session, case_number: str) -> str:
         SELECT id, assessment_id, stage, seq, name, path, sha256, n_bytes, note, created_at
         FROM artifact WHERE submission_id=:i ORDER BY stage, seq, name"""),
         {"i": sub["id"]}).mappings())
-    by_stage: dict[str, list] = {}
+
+    # 판정을 다시 돌리면 산출물이 한 벌 더 쌓인다. 실행을 갈라 보여 주지 않으면
+    # 어느 파일이 어느 실행의 것인지 알 수 없다 — 실측으로 같은 이름이 세 번씩
+    # 나와 「호출실패」가 한 번인지 세 번인지 구분되지 않았다.
+    runs = {r["id"]: dict(r) for r in s.execute(text("""
+        SELECT id, kind, status, attempts, model, started_at, finished_at
+        FROM assessment WHERE submission_id=:i ORDER BY id DESC"""),
+        {"i": sub["id"]}).mappings()}
+
+    by_run: dict[int | None, dict[str, list]] = {}
     for a in arts:
-        by_stage.setdefault(a["stage"], []).append(a)
+        by_run.setdefault(a["assessment_id"], {}).setdefault(a["stage"], []).append(a)
     facts = _facts(s, sub, aid)
 
-    secs = ""
-    for i, (st, ko) in enumerate(STAGE_KO.items(), 1):
-        items = by_stage.get(st, [])
-        rows = "".join(f"""<div class="art">
+    def _rows(items) -> str:
+        return "".join(f"""<div class="art">
  <div class="nm"><b>{e(a['name'])}</b><span>{e(a['note'] or '')}</span></div>
  <div class="n">{_kb(a['n_bytes'])}</div>
  <div class="n hash">{e(a['sha256'][:10])}</div>
  <div><a href="/audit/artifact/{a['id']}">열기</a></div></div>""" for a in items)
-        empty = "" if items else '<div class="facts" style="color:var(--tm)">남은 파일 없음</div>'
-        secs += f"""<div class="stage">
+
+    def _stages(stages: dict[str, list], keys, with_facts: bool = True) -> str:
+        """`keys` 에 든 단계만 그린다.
+
+        모든 단계를 늘 그렸더니 실행별로 나눈 뒤 ②③④ 가 위에도 한 번,
+        실행 상자 안에도 한 번 — 빈 껍데기가 겹쳐 보였다.
+        """
+        out = ""
+        for st, ko in STAGE_KO.items():
+            if st not in keys:
+                continue
+            items = stages.get(st, [])
+            empty = "" if items else '<div class="facts" style="color:var(--tm)">남은 파일 없음</div>'
+            out += f"""<div class="stage">
  <h2>{e(ko)}<small>{len(items)}개 파일</small></h2>
- <div class="facts">{facts.get(st, '아직 진행되지 않았습니다.')}</div>
- <div class="arts">{rows}</div>{empty}</div>"""
+ {f'<div class="facts">{facts.get(st, "아직 진행되지 않았습니다.")}</div>' if with_facts else ''}
+ <div class="arts">{_rows(items)}</div>{empty}</div>"""
+        return out
+
+    # 수집(assessment_id 없음)은 접수 건에 딸린 것이라 실행과 무관하다.
+    run_keys = {st for rid, v in by_run.items() if rid is not None for st in v}
+    sub_keys = set(by_run.get(None, {}))
+    secs = _stages(by_run.get(None, {}), sub_keys)
+
+    order = sorted((k for k in by_run if k is not None), reverse=True)
+    for n, rid in enumerate(order):
+        r = runs.get(rid) or {}
+        n_files = sum(len(v) for v in by_run[rid].values())
+        head = (f"판정 {rid} · {e(r.get('status') or '?')}"
+                f" · 시도 {r.get('attempts') or 0}회"
+                + (f" · {r['started_at']:%m-%d %H:%M}" if r.get("started_at") else ""))
+        # 오래된 것일수록 큰 번호가 붙던 것을 바로잡는다 — 바로 앞 실행이 1이다.
+        tag = "최신" if n == 0 else f"{n}번 전"
+        secs += f"""<details class="run" {"open" if n == 0 else ""}>
+ <summary><b>{head}</b><span class="rtag">{tag}</span>
+  <span class="rn">{n_files}개 파일</span></summary>
+ {_stages(by_run[rid], set(by_run[rid]), with_facts=(n == 0))}</details>"""
+
+    # 파일이 없는 단계(검토·판정)는 어느 실행에도 없다. 설명만 한 번 붙인다.
+    rest = set(STAGE_KO) - run_keys - sub_keys
+    if rest:
+        secs += _stages({}, rest)
+
+    if len(order) > 1:
+        secs = (f'<div class="note warn2">이 건은 <b>{len(order)}번</b> 판정했습니다. '
+                f'아래는 실행별로 나눠 두었고, 맨 위가 가장 최근 것입니다. '
+                f'화면·보고서는 <b>최신 판정({order[0]})</b>을 씁니다.</div>' + secs)
 
     val = list(s.execute(text("""SELECT attempt, passed, error_count, errors
                                  FROM validation_log WHERE assessment_id=:i
