@@ -204,7 +204,7 @@ def render_upload(sub: dict, doc_types: list[dict], grades: list[str],
 <div id="msg"></div>
 <div style="display:flex;gap:8px;margin-top:14px">
  <button class="go" id="up" disabled>서류 수집하기</button>
- <button onclick="location.href='/'">나중에 하기</button>
+ <button onclick="location.href='/submissions/{sub['id']}'">나중에 하기</button>
 </div>
 {already}
 """
@@ -270,10 +270,20 @@ $('up').onclick = async () => {{
   const warn = (d.warnings || []).map(w => `<div class="msg no">${{w}}</div>`).join('');
   const masked = Object.entries(d.masked || {{}})
     .map(([k, v]) => `${{k}} ${{v}}건`).join(' · ') || '없음';
+  const next = `/submissions/${{SID}}`;
   $('msg').innerHTML = warn + `<div class="msg ok">
     문서 ${{d.n_documents}}건 · 조각 ${{d.n_fragments}}개 · 가려진 개인정보 ${{masked}}
     · 기이수 ${{d.prior_learning.length}}건</div>`;
-  setTimeout(() => location.href = '/', 1400);
+  // 다음에 할 일은 심사 개요에 있다. 홈으로 보내면 방금 올린 건을 다시 찾아야 한다.
+  // 경고가 있으면 넘기지 않는다 — 1.4초에 스쳐 지나가면 못 읽는다.
+  if (warn) {{
+    $('msg').innerHTML += `<div style="margin-top:10px">
+      <a class="go" style="display:inline-block;padding:8px 18px;border-radius:8px;
+         background:var(--tp);color:var(--s1);font-weight:600" href="${{next}}">
+         그래도 계속 →</a></div>`;
+    return;
+  }}
+  setTimeout(() => location.href = next, 1400);
 }};
 </script>"""
     return page(f"{sub['case_number']} 서류 올리기", body, css=CSS,

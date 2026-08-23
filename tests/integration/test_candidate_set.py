@@ -321,3 +321,45 @@ def test_time_documents_are_not_counted_as_extra():
     assert st.extra_docs, "추가 자료가 하나도 없다"
     assert not any(is_time_doc(d["doc_type"]) for d in st.extra_docs)
     assert st.n_documents - len(st.extra_docs) == 2, "이수증·편성표 2건이 빠져야 한다"
+
+
+# ── 접수 뒤 어디로 가나 ───────────────────────────────────────────
+
+def test_upload_screen_leads_to_the_case_overview():
+    """서류를 올리고 나면 그 건의 심사 개요로 가야 한다.
+
+    홈으로 보내고 있었다 — 개요 화면이 생기기 전에 쓴 코드다. 방금 올린 건을
+    목록에서 다시 찾아야 했고, 다음 할 일(「근거 분석 시작」)도 거기 있다.
+    """
+    case = "R2026-9096"
+    _drop(case)
+    c = _client()
+    try:
+        r = c.post("/submissions", json={
+            "case_number": case, "track": "B",
+            "target_program_id": "양식조리_L4", "qualifications": []})
+        sid = r.json()["id"]
+        h = c.get(f"/submissions/{sid}/upload").text
+        assert f"const next = `/submissions/${{SID}}`" in h, "업로드 뒤 갈 곳이 개요가 아니다"
+        assert "location.href = next" in h
+        assert "location.href = '/'" not in h, "아직 홈으로 보내는 자리가 남아 있다"
+        assert f"location.href='/submissions/{sid}'\">나중에 하기" in h, \
+            "「나중에 하기」도 개요로 가야 한다"
+    finally:
+        _drop(case)
+
+
+def test_warnings_are_not_flashed_past():
+    """경고가 있으면 넘기지 않는다 — 1.4초에 스쳐 지나가면 못 읽는다."""
+    case = "R2026-9095"
+    _drop(case)
+    c = _client()
+    try:
+        sid = c.post("/submissions", json={
+            "case_number": case, "track": "B",
+            "target_program_id": "양식조리_L4", "qualifications": []}).json()["id"]
+        h = c.get(f"/submissions/{sid}/upload").text
+        assert "if (warn)" in h, "경고가 있을 때 멈추지 않는다"
+        assert "그래도 계속" in h, "경고를 읽은 뒤 갈 길이 없다"
+    finally:
+        _drop(case)
