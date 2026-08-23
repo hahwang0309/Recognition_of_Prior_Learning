@@ -90,6 +90,9 @@ def create_submission(body: SubmissionCreate, s: Session = Depends(get_session))
     repo = CatalogRepo(s)
     if repo.get_program(body.target_program_id) is None:
         raise HTTPException(404, f"종목을 찾을 수 없습니다: {body.target_program_id}")
+    if body.track == "A" and not body.qualifications:
+        raise HTTPException(422, "Track A 는 보유 자격이 필요합니다. "
+                                 "자격이 없으면 Track B 로 접수하세요")
     for q in body.qualifications:
         if repo.get_qualification(q) is None:
             raise HTTPException(404, f"자격을 찾을 수 없습니다: {q}")
@@ -102,9 +105,13 @@ def create_submission(body: SubmissionCreate, s: Session = Depends(get_session))
         VALUES (:c, :t, :p, :n) RETURNING id"""),
         {"c": body.case_number, "t": body.track, "p": body.target_program_id,
          "n": body.note}).scalar_one()
-    s.execute(text("""INSERT INTO document (submission_id, doc_key, doc_type, grade, issuer)
-                      VALUES (:s, :k, '과정평가형자격', 'A', :q)"""),
-              [{"s": sid, "k": f"D{i:02d}", "q": q} for i, q in enumerate(body.qualifications, 1)])
+    # 자격이 없으면 넣지 않는다. 빈 목록을 executemany 에 넘기면
+    # 「A value is required for bind parameter」로 터진다.
+    if body.qualifications:
+        s.execute(text("""INSERT INTO document (submission_id, doc_key, doc_type, grade, issuer)
+                          VALUES (:s, :k, '과정평가형자격', 'A', :q)"""),
+                  [{"s": sid, "k": f"D{i:02d}", "q": q}
+                   for i, q in enumerate(body.qualifications, 1)])
     if body.track == "A":
         enqueue(s, "track_a", {"submission_id": sid})   # 입력이 보유 자격뿐이라 바로 돌릴 수 있다
     # Track B 는 문서 수집 후 POST /submissions/{id}/assess 로 시작한다

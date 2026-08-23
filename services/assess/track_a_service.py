@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 from krpl_core.config import get_rubric
 from krpl_rules import assess_track_a, eligible_units, rejected_units
 from krpl_rules.track_a import HeldUnit
-from services.assess.case_state import TIME_DOC_TYPES
+from services.assess.case_state import is_time_doc
 from services.assess.package import build_package
 from services.catalog import CatalogRepo
 
@@ -149,10 +149,9 @@ def run_track_a(s: Session, submission_id: int) -> int:
 
     # 근거 분석에 쓸 자료가 없으면 이 건은 시간 대조로 끝난다 — 검토 대기로 올린다.
     # 자료가 있으면 status 를 건드리지 않는다. 다음 할 일은 개요 화면이 안내한다.
-    n_extra = s.execute(text("""
-        SELECT count(*) FROM document
-        WHERE submission_id=:i AND doc_type <> ALL(:skip)"""),
-        {"i": submission_id, "skip": list(TIME_DOC_TYPES)}).scalar_one()
+    kinds = [r[0] for r in s.execute(text(
+        "SELECT doc_type FROM document WHERE submission_id=:i"), {"i": submission_id})]
+    n_extra = sum(1 for k in kinds if not is_time_doc(k))
     if not n_extra:
         s.execute(text("""UPDATE submission SET status='assessed'
                           WHERE id=:i AND status IN ('received','ingested')"""),

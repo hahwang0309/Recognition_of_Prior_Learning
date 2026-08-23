@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+from functools import lru_cache
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -19,8 +21,37 @@ from sqlalchemy.orm import Session
 
 from services.review.triage import needs_judgment
 
-# 시간 대조가 이미 값을 뽑아 쓴 자료. 근거 분석에서 「추가 자료」로 세지 않는다.
-TIME_DOC_TYPES = {"과정평가형자격", "NCS 기반 훈련과정 이수증", "교육과정 편성표"}
+def _norm(s: str) -> str:
+    """문서 종류 이름을 견주기 좋게 다듬는다.
+
+    같은 문서를 두 이름으로 부르고 있었다 — 화면(기준서)은 `NCS기반_훈련이수증`,
+    실사례 데이터는 `NCS 기반 훈련과정 이수증`. 그래서 화면으로 올린 이수증이
+    「추가 자료」로 세어졌다. 공백·밑줄·가운뎃점을 지우고 견준다.
+    """
+    return re.sub(r"[\s_·∙‧・]|과정|기반", "", s or "")
+
+
+@lru_cache(maxsize=1)
+def _time_doc_types() -> frozenset[str]:
+    """시간 대조가 이미 값을 뽑아 쓴 자료. 근거 분석에서 「추가 자료」로 세지 않는다.
+
+    어느 문서가 그런지는 정책이므로 기준서(`document_types.*.time_source`)가 정한다.
+    코드에 적어 두었더니 화면 어휘와 어긋났다.
+    """
+    from krpl_core.config import get_rubric
+    names = {"과정평가형자격"}
+    for name, spec in (get_rubric().document_types or {}).items():
+        if isinstance(spec, dict) and spec.get("time_source"):
+            names.add(name)
+    return frozenset(_norm(n) for n in names)
+
+
+def is_time_doc(doc_type: str) -> bool:
+    return _norm(doc_type) in _time_doc_types()
+
+
+# 예전 이름을 그대로 쓰던 자리를 위해 남긴다. 견줄 때는 is_time_doc() 을 쓴다.
+TIME_DOC_TYPES = {"과정평가형자격", "NCS기반_훈련이수증", "교육과정_편성표"}
 
 log = logging.getLogger(__name__)
 
@@ -236,7 +267,7 @@ def case_state(s: Session, submission_id: int) -> CaseState | None:
         program_name=sub["official_name"] or sub["target_program_id"],
         total_hours=sub["total_hours"] or 0,
         n_documents=len(docs), n_fragments=sum(d["n_frag"] for d in docs),
-        extra_docs=[d for d in docs if d["doc_type"] not in TIME_DOC_TYPES],
+        extra_docs=[d for d in docs if not is_time_doc(d["doc_type"])],
         time=done_runs.get("time") or runs.get("time"),
         evidence=ev, evidence_done=ev_done, n_reviewed=n_reviewed,
         n_judge=n_judge, n_settled=n_settled, judged=judged,

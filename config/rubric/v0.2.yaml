@@ -43,11 +43,13 @@ document_types:
     proves: {신원: full, 소속·기간: full, 직무명: full, 수행내용: partial, 최신성: full}
   NCS기반_훈련이수증:
     grade: B
+    time_source: true
     proves: {신원: full, 소속·기간: full, 직무명: full, 수행내용: full, 역량수준: full, 최신성: full}
     requires: [능력단위코드, 이수시간, 내부평가결과]
     note: 내부평가 합격이 확인될 때만 역량수준 인정 → R0 대상
   교육과정_편성표:
     grade: B
+    time_source: true
     proves: {직무명: full, 수행내용: full}
     note: 교과목↔능력단위 대응만 증명. 평가결과는 증명 못 함
   사내·기관_교육이수내역:

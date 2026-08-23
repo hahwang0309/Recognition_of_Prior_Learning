@@ -41,7 +41,7 @@ def tiny(tmp_path: Path) -> Path:
         "심사번호: R2026-9900\n목표종목: 양식조리_L4\n", encoding="utf-8")
     (tmp_path / "경력기술서.txt").write_text(
         "호텔 양식당에서 4년간 육류 조리를 담당했습니다.\n", encoding="utf-8")
-    _write_manifest(tmp_path, [{"파일": "경력기술서.txt", "종류": "경력기술서",
+    _write_manifest(tmp_path, [{"파일": "경력기술서.txt", "종류": "경력기술서·자기소개서",
                                 "신뢰도등급": "E", "발급기관": "본인",
                                 "발급일": "2026-06-20"}])
     return tmp_path
@@ -62,7 +62,7 @@ def test_missing_application_says_so(tmp_path):
 
 
 def test_file_named_in_manifest_must_exist(tiny):
-    _write_manifest(tiny, [{"파일": "없는파일.txt", "종류": "경력기술서",
+    _write_manifest(tiny, [{"파일": "없는파일.txt", "종류": "경력기술서·자기소개서",
                             "신뢰도등급": "E", "발급기관": "본인", "발급일": ""}])
     with pytest.raises(FileNotFoundError, match="없는파일"):
         load_candidate.read_set(tiny)
@@ -70,7 +70,7 @@ def test_file_named_in_manifest_must_exist(tiny):
 
 def test_unknown_grade_is_refused(tiny):
     """등급은 기준서가 정한 A~E 뿐이다."""
-    _write_manifest(tiny, [{"파일": "경력기술서.txt", "종류": "경력기술서",
+    _write_manifest(tiny, [{"파일": "경력기술서.txt", "종류": "경력기술서·자기소개서",
                             "신뢰도등급": "Z", "발급기관": "본인", "발급일": ""}])
     with pytest.raises(ValueError, match="모르는 신뢰도 등급"):
         load_candidate.read_set(tiny)
@@ -95,9 +95,9 @@ def test_empty_manifest_is_refused(tiny):
 def test_doc_keys_run_in_order(tiny):
     shutil.copy(tiny / "경력기술서.txt", tiny / "두번째.txt")
     _write_manifest(tiny, [
-        {"파일": "경력기술서.txt", "종류": "경력기술서", "신뢰도등급": "E",
+        {"파일": "경력기술서.txt", "종류": "경력기술서·자기소개서", "신뢰도등급": "E",
          "발급기관": "본인", "발급일": ""},
-        {"파일": "두번째.txt", "종류": "면접 예비답변", "신뢰도등급": "E",
+        {"파일": "두번째.txt", "종류": "경력기술서·자기소개서", "신뢰도등급": "E",
          "발급기관": "본인", "발급일": ""}])
     _, docs = load_candidate.read_set(tiny)
     assert [d["doc_key"] for d in docs] == ["D01", "D02"]
@@ -113,7 +113,7 @@ def test_loading_a_tiny_set_works(tiny):
         with session_scope() as s:
             got = s.execute(text("""SELECT doc_type, grade FROM document
                 WHERE submission_id=:i"""), {"i": sid}).one()
-        assert got == ("경력기술서", "E")
+        assert got == ("경력기술서·자기소개서", "E")
     finally:
         with session_scope() as s:
             s.execute(text("DELETE FROM submission WHERE case_number=:c"), {"c": cn})
@@ -192,3 +192,132 @@ def test_the_real_set_lands_as_designed():
     # 편성표만 낸 3단위는 이유와 함께 남아야 한다
     assert len(d["갈음불가"]) == 3, d["갈음불가"]
     assert all(x["reason"] for x in d["갈음불가"])
+
+
+# ── 화면으로 새 접수 ──────────────────────────────────────────────
+
+def _client():
+    from fastapi.testclient import TestClient
+    from services.gateway.api import app
+    return TestClient(app)
+
+
+def _drop(*cases: str) -> None:
+    with session_scope() as s:
+        for c in cases:
+            s.execute(text("DELETE FROM submission WHERE case_number=:c"), {"c": c})
+
+
+def test_track_b_can_be_filed_without_a_qualification():
+    """경력·훈련으로 하는 심사라 과정평가형 자격이 없는 것이 오히려 흔하다.
+
+    화면은 Track B 에서 자격 없이 저장을 허용하는데 API 스키마가 최소 1개를
+    강제해 422 를 뱉었다. 그 길로 접수한 적이 없어 드러나지 않았다 —
+    실사례 4건은 API 를 거치지 않고 DB 에 바로 넣은 것이다.
+    """
+    _drop("R2026-9099")
+    try:
+        r = _client().post("/submissions", json={
+            "case_number": "R2026-9099", "track": "B",
+            "target_program_id": "양식조리_L4", "qualifications": [],
+            "note": "자격 없이 경력만"})
+        assert r.status_code == 202, r.text
+        with session_scope() as s:
+            n = s.execute(text("""SELECT count(*) FROM document d
+                JOIN submission b ON b.id=d.submission_id
+                WHERE b.case_number='R2026-9099'"""), {}).scalar_one()
+        assert n == 0, "자격이 없는데 자격 문서가 들어갔다"
+    finally:
+        _drop("R2026-9099")
+
+
+def test_track_a_still_needs_one():
+    """Track A 는 보유 자격이 유일한 입력이라 없으면 돌릴 것이 없다."""
+    _drop("R2026-9098")
+    try:
+        r = _client().post("/submissions", json={
+            "case_number": "R2026-9098", "track": "A",
+            "target_program_id": "양식조리_L4", "qualifications": []})
+        assert r.status_code == 422
+        assert "Track B" in r.json()["detail"], "무엇을 하라는지 말해야 한다"
+    finally:
+        _drop("R2026-9098")
+
+
+def test_the_candidate_can_be_filed_through_the_api():
+    """README 가 시키는 대로 화면에서 넣을 수 있어야 한다."""
+    import yaml
+    if not (SRC / "신청서.yaml").exists():
+        pytest.skip("test/candidate01 이 없다")
+    apply = yaml.safe_load((SRC / "신청서.yaml").read_text(encoding="utf-8"))
+    case = "R2026-9097"
+    _drop(case)
+    try:
+        r = _client().post("/submissions", json={
+            "case_number": case, "track": "B",
+            "target_program_id": apply["목표종목"],
+            "qualifications": apply.get("보유자격") or [],
+            "note": apply.get("비고")})
+        assert r.status_code == 202, r.text
+        assert r.json()["status"] == "received"
+    finally:
+        _drop(case)
+
+
+# ── 문서 종류 어휘 ────────────────────────────────────────────────
+
+def test_screen_and_code_agree_on_document_kinds():
+    """화면이 내미는 목록과 코드가 견주는 이름이 같아야 한다.
+
+    화면은 기준서의 `document_types` 를 그대로 내민다. 그런데 시간 대조가
+    쓰는 이름은 코드에 따로 적혀 있어 갈라졌다 — 화면으로 올린 이수증이
+    「추가 자료」로 세어졌다. 이제 기준서(`time_source`)가 정한다.
+    """
+    from krpl_core.config import get_rubric
+    from services.assess.case_state import is_time_doc
+
+    dt = get_rubric().document_types
+    marked = {k for k, v in dt.items() if isinstance(v, dict) and v.get("time_source")}
+    assert marked, "기준서에 time_source 표시가 하나도 없다"
+    for k in marked:
+        assert is_time_doc(k), f"기준서가 표시한 {k} 를 코드가 못 알아본다"
+    for k in set(dt) - marked:
+        assert not is_time_doc(k), f"표시 없는 {k} 가 시간 대조 자료로 잡힌다"
+
+
+def test_legacy_free_text_names_still_match():
+    """실사례 데이터는 자유 텍스트로 들어가 있다. 그것도 알아봐야 한다."""
+    from services.assess.case_state import is_time_doc
+    for old in ("NCS 기반 훈련과정 이수증", "교육과정 편성표", "과정평가형자격"):
+        assert is_time_doc(old), old
+    for other in ("경력증명서", "비NCS 교육 수료증", "작업일지 발췌"):
+        assert not is_time_doc(other), other
+
+
+def test_manifest_kinds_come_from_the_rubric(tiny):
+    """접수목록에 자유 텍스트를 적으면 막는다 — 그래야 갈라지지 않는다."""
+    _write_manifest(tiny, [{"파일": "경력기술서.txt", "종류": "내 맘대로 지은 종류",
+                            "신뢰도등급": "E", "발급기관": "본인", "발급일": ""}])
+    with pytest.raises(ValueError, match="모르는 서류 종류"):
+        load_candidate.read_set(tiny)
+
+
+@pytest.mark.skipif(not (SRC / "접수목록.csv").exists(), reason="test/candidate01 이 없다")
+def test_the_real_manifest_uses_screen_vocabulary():
+    from krpl_core.config import get_rubric
+    _, docs = load_candidate.read_set(SRC)
+    dt = get_rubric().document_types
+    for d in docs:
+        assert d["doc_type"] in dt, d["doc_type"]
+
+
+@pytest.mark.skipif(not (SRC / "접수목록.csv").exists(), reason="test/candidate01 이 없다")
+def test_time_documents_are_not_counted_as_extra():
+    """이수증·편성표는 시간 대조가 이미 값을 뽑아 썼다. 두 번 세지 않는다."""
+    from services.assess.case_state import case_state, is_time_doc
+    cn, sid, _ = load_candidate.load(SRC)
+    with session_scope() as s:
+        st = case_state(s, sid)
+    assert st.extra_docs, "추가 자료가 하나도 없다"
+    assert not any(is_time_doc(d["doc_type"]) for d in st.extra_docs)
+    assert st.n_documents - len(st.extra_docs) == 2, "이수증·편성표 2건이 빠져야 한다"

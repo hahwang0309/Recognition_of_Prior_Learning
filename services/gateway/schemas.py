@@ -14,7 +14,12 @@ class SubmissionCreate(BaseModel):
     case_number: str = Field(pattern=r"^R\d{4}-\d{4}$", description="심사번호. 식별정보는 받지 않는다")
     track: Literal["A", "B"] = "A"
     target_program_id: str
-    qualifications: list[str] = Field(min_length=1, description="보유 자격 목록")
+    # Track A 는 보유 자격이 유일한 입력이라 반드시 있어야 하지만,
+    # Track B 는 경력·훈련 기록으로 하는 심사라 자격이 없는 것이 오히려 흔하다.
+    # 실측: 실사례 4건 모두 과정평가형 자격이 없다.
+    # 최소 개수를 스키마로 강제했더니 화면은 저장을 허용하는데 API 가 422 를
+    # 뱉었다 — 그 길로 접수한 적이 없어 드러나지 않았다. 검사는 track 을 보고 한다.
+    qualifications: list[str] = Field(default_factory=list, description="보유 자격 목록")
     note: str | None = None
 
 

@@ -57,13 +57,21 @@ def read_set(src: Path) -> tuple[dict, list[dict]]:
             if ext not in st.storage.allowed_extensions:
                 raise ValueError(f"{name}: 읽을 수 없는 형식 {ext!r} "
                                  f"(가능: {', '.join(st.storage.allowed_extensions)})")
+            kind = (row.get("종류") or "").strip()
+            # 종류는 화면(기준서)이 내미는 목록과 같아야 한다. 자유 텍스트로 두었더니
+            # 「NCS 기반 훈련과정 이수증」과 「NCS기반_훈련이수증」이 갈라져,
+            # 화면으로 올린 이수증이 「추가 자료」로 세어졌다.
+            if kind not in rb.document_types:
+                raise ValueError(
+                    f"{name}: 모르는 서류 종류 {kind!r}\n"
+                    f"  가능: {', '.join(sorted(rb.document_types))}")
             grade = (row.get("신뢰도등급") or "").strip()
             if grade not in rb.grades:
                 raise ValueError(f"{name}: 모르는 신뢰도 등급 {grade!r} "
                                  f"(가능: {', '.join(rb.grades)})")
             docs.append({
                 "doc_key": f"D{n:02d}",
-                "doc_type": (row.get("종류") or "").strip(),
+                "doc_type": kind,
                 "grade": grade,
                 "issuer": (row.get("발급기관") or "").strip() or None,
                 "issued_on": (row.get("발급일") or "").strip() or None,
