@@ -173,21 +173,28 @@ def render_case(s: Session, submission_id: int) -> str | None:
                        off=True)
 
     # ── ③ 전문가 검토 ──────────────────────────────────────────────
+    # 다섯 단계로 나뉜다 — 인정검토 → 추가서류 → 면접 → 실기 → 최종.
+    # 어느 단계에 서 있는지를 개요에서도 보여 준다.
     if done:
+        stg = st.stage_line or ""
         if st.review_done:
             steps += _step("③", "전문가 검토", _st("완료", "ok"),
                            f"판단이 필요한 {st.n_judge}개 항목을 모두 정하셨습니다."
                            + (f" 나머지 {st.n_settled}개는 이수 기록으로 확정된 것입니다."
-                              if st.n_settled else ""),
-                           f'<a href="/assessments/{done.id}/review">다시 보기</a>')
+                              if st.n_settled else "")
+                           + (f"<em> {stg}</em>" if stg else ""),
+                           f'<a href="/assessments/{done.id}/review/{st.next_stage}">'
+                           f'{st.next_stage}단계 열기</a>')
         else:
             settled = (f" 나머지 <b>{st.n_settled}개</b>는 이수 기록으로 확정돼 "
                        f"확인만 하시면 됩니다." if st.n_settled else "")
             steps += _step("③", "전문가 검토",
                            _st(f"{st.judged}/{st.n_judge}", "wn"),
                            f"보고서 {done.n_elements}개 항목 가운데 "
-                           f"<b>{st.review_left}개</b>가 판단 대상입니다.{settled}",
-                           f'<a class="go" href="/assessments/{done.id}/review">검토하기</a>',
+                           f"<b>{st.review_left}개</b>가 판단 대상입니다.{settled}"
+                           + (f"<em> {stg}</em>" if stg else ""),
+                           f'<a class="go" href="/assessments/{done.id}/review/'
+                           f'{st.next_stage}">검토하기</a>',
                            now=True)
     else:
         steps += _step("③", "전문가 검토", _st("대기"),

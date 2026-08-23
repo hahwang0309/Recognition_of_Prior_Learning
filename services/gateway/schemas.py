@@ -231,3 +231,22 @@ class RecommendOut(BaseModel):
     n_units: int | None
     credit_rate_strict: float
     credit_rate_adjusted: float
+
+
+class RemediationIn(BaseModel):
+    """보완 항목 하나의 결과. 항목은 여러 요소에 걸쳐 병합된 것이다."""
+    key: str = Field(min_length=8, max_length=16)
+    method: str = Field(max_length=8)
+    item: str
+    result: str = Field(description="통과 | 미통과 | 미실시")
+    note: str | None = None
+    reviewer: str | None = Field(default=None, max_length=60)
+
+
+class RemediationOut(BaseModel):
+    key: str
+    result: str
+    stamp: str
+    recognized_hours: int
+    total_hours: int
+    n_recognized: int

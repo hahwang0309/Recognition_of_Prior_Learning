@@ -10,7 +10,7 @@ from typing import Any
 
 from sqlalchemy import (
     BigInteger, Boolean, Date, DateTime, ForeignKey, Index,
-    Integer, Numeric, String, Text, UniqueConstraint, func,
+    Integer, Numeric, SmallInteger, String, Text, UniqueConstraint, func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -201,6 +201,9 @@ class Assessment(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     overall_note: Mapped[str | None] = mapped_column(Text)
+    # 전문가 검토가 어느 단계까지 왔나.
+    #   1 인정검토 · 2 추가서류 · 3 면접 · 4 실기 · 5 최종
+    review_stage: Mapped[int] = mapped_column(SmallInteger, server_default="1")
     # 진행 상황. 판정이 도는 동안 **별도 세션에서 즉시 커밋**한다 —
     # 본 트랜잭션은 끝날 때까지 커밋되지 않아 밖에서는 아무것도 안 보이기 때문이다.
     progress: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
@@ -230,6 +233,33 @@ class ValidationLog(Base):
     error_count: Mapped[int] = mapped_column(server_default="0")
     errors: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class RemediationResult(Base):
+    """보완 항목 하나의 결과 — 서류를 받았나, 면접·실기를 통과했나.
+
+    ## 왜 요소가 아니라 항목 단위인가
+
+    보완 항목은 여러 요소에 걸쳐 병합된다. 「안전보건교육 이수확인서」 한 건이
+    5개 능력단위 15개 요소를 한꺼번에 푼다. 요소마다 따로 물으면 같은 서류를
+    열다섯 번 확인하는 꼴이 된다.
+
+    통과하면 그 항목이 채우기로 한 KSA 가 채워진 것이므로 요소 인정은 계산이다.
+    다만 「무엇을 보고 그렇게 됐는지」는 최종 화면과 감사 기록에 남긴다.
+    """
+    __tablename__ = "remediation_result"
+    __table_args__ = (UniqueConstraint("assessment_id", "item_key",
+                                       name="uq_remediation_item"),)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    assessment_id: Mapped[int] = mapped_column(ForeignKey("assessment.id", ondelete="CASCADE"), index=True)
+    # 항목 글 자체의 sha256 앞 16자. 같은 판정 안에서 항목을 가리키는 이름이다.
+    item_key: Mapped[str] = mapped_column(String(16))
+    method: Mapped[str] = mapped_column(String(8))        # 추가서류|면접|실기|훈련
+    item: Mapped[str] = mapped_column(Text)               # 무엇을 물었는지 그대로 남긴다
+    result: Mapped[str] = mapped_column(String(8))        # 통과|미통과|미실시
+    note: Mapped[str | None] = mapped_column(Text)
+    decided_by: Mapped[str | None] = mapped_column(String(60))
+    decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class ElementReview(Base):

@@ -14,18 +14,24 @@ from krpl_core.queue import enqueue, stats, stuck, worker_alive
 from services.catalog import CatalogRepo
 from services.ingest import UploadRejected, ingest_submission, store
 from krpl_core.audit import AuditStore, read_artifact
+from datetime import datetime
+
 from services.assess.case_state import case_state
 from services.report import (
     env_label, render_artifact, render_audit_case, render_audit_list,
     render_case, render_dashboard, render_evidence, render_home, render_new,
-    render_review, render_stats, render_track_a, render_upload,
+    render_review, render_stage, render_stats, render_track_a, render_upload,
 )
-from services.review import record_decision, review_summary, save_element_review
+from services.review import (
+    record_decision, review_summary, save_element_review, save_result, set_stage,
+)
+from services.review import load as review_ctx
 from services.gateway.schemas import (
     AssessmentOut, AssessmentStatus, AssessRequest, BulkReviewIn, DecisionIn,
     DecisionOut,
     ElementOut, ElementReviewIn, ElementReviewOut, FragmentOut, IngestOut,
     IngestRequest, ProgramOut, RecommendOut, ReviewSummaryOut, SubmissionCreate,
+    RemediationIn, RemediationOut,
     SubmissionOut, TrackBAssessmentOut, TrackBElementOut, ValidationAttemptOut,
 )
 
@@ -648,3 +654,54 @@ def start_analysis(sid: int, s: Session = Depends(get_session)):
     enqueue(s, "track_b", {"submission_id": sid, "profile": None})
     s.execute(text("UPDATE submission SET status='queued' WHERE id=:i"), {"i": sid})
     return RedirectResponse(f"/submissions/{sid}", status_code=303)
+
+
+# ── 전문가 검토 5단계 ─────────────────────────────────────────────
+# 요소 서른셋에 한꺼번에 가·부를 찍으라고 하면 무엇부터 볼지 알 수 없다.
+# 심사는 원래 순서가 있는 일이다 — 서류로 정할 것, 서류를 더 받을 것,
+# 면접, 실기, 그리고 최종. 화면이 그 순서를 따라간다.
+
+@app.get("/assessments/{aid}/review/{stage}", response_class=HTMLResponse)
+def review_stage(aid: int, stage: int, s: Session = Depends(get_session)):
+    ctx = review_ctx(s, aid)
+    if ctx is None:
+        raise HTTPException(404, "근거 분석 결과를 찾을 수 없습니다")
+    if not 1 <= stage <= 5:
+        raise HTTPException(404, "1~5 단계만 있습니다")
+    set_stage(s, aid, stage)
+    return HTMLResponse(render_stage(ctx, stage))
+
+
+@app.post("/assessments/{aid}/remediation", response_model=RemediationOut)
+def record_remediation(aid: int, body: RemediationIn,
+                       s: Session = Depends(get_session)):
+    """보완 항목 하나의 결과를 기록한다.
+
+    항목은 여러 요소에 걸쳐 병합돼 있다 — 「안전보건교육 이수확인서」 한 건이
+    5개 단위 15개 요소를 한꺼번에 푼다. 요소마다 묻지 않는 이유다.
+    """
+    ctx = review_ctx(s, aid)
+    if ctx is None:
+        raise HTTPException(404, "근거 분석 결과를 찾을 수 없습니다")
+    known = {i.key: i for g in ctx.items.values() for i in g}
+    it = known.get(body.key)
+    if it is None:
+        raise HTTPException(404, "그런 보완 항목이 없습니다")
+    try:
+        save_result(s, aid, it.key, it.method, it.item, body.result,
+                    note=body.note, reviewer=body.reviewer)
+    except ValueError as ex:
+        raise HTTPException(422, str(ex)) from ex
+    s.execute(text("""INSERT INTO audit_log (entity, entity_id, action, actor, detail)
+                      VALUES ('assessment', :i, 'remediation', :w, CAST(:d AS jsonb))"""),
+              {"i": str(aid), "w": body.reviewer or "심사자",
+               "d": json.dumps({"방법": it.method, "항목": it.item,
+                                "결과": body.result, "대상요소": it.n_elements},
+                               ensure_ascii=False)})
+    fresh = review_ctx(s, aid)
+    got, tot = fresh.recognized_hours()
+    return RemediationOut(
+        key=it.key, result=body.result,
+        stamp=f"{body.reviewer or '심사자'} {datetime.now():%Y-%m-%d}",
+        recognized_hours=got, total_hours=tot,
+        n_recognized=sum(1 for v in fresh.outcome_of.values() if v == "인정"))

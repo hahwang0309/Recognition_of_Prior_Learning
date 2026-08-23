@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -20,6 +21,8 @@ from services.review.triage import needs_judgment
 
 # 시간 대조가 이미 값을 뽑아 쓴 자료. 근거 분석에서 「추가 자료」로 세지 않는다.
 TIME_DOC_TYPES = {"과정평가형자격", "NCS 기반 훈련과정 이수증", "교육과정 편성표"}
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -65,6 +68,8 @@ class CaseState:
     evidence_done: Run | None
     n_reviewed: int                         # ③ 전문가 검토 — 판단이 기록된 요소 수
     n_judge: int                            # 사람이 따져야 하는 요소 수
+    next_stage: int                         # 다음에 손댈 검토 단계 (1~5)
+    stage_line: str                         # 다섯 단계 진척을 한 줄로
     n_settled: int                          # 기록으로 확정돼 확인만 하면 되는 수
     judged: int                             # 그중 판단이 기록된 수
     decision: dict | None                   # ④ 최종 판정
@@ -187,6 +192,7 @@ def case_state(s: Session, submission_id: int) -> CaseState | None:
     done_runs = _runs(s, submission_id, only_done=True)
     ev, ev_done = runs.get("evidence"), done_runs.get("evidence")
     n_reviewed = n_judge = n_settled = judged = 0
+    next_stage, stage_line = 1, ""
     if ev_done is not None:
         n_reviewed = s.execute(text(
             "SELECT count(DISTINCT element_id) FROM element_review WHERE assessment_id=:a"),
@@ -204,6 +210,20 @@ def case_state(s: Session, submission_id: int) -> CaseState | None:
             else:
                 n_settled += 1
 
+        # 다섯 단계 가운데 어디에 서 있나. 계산은 services/review 에만 둔다 —
+        # 개요와 검토 화면이 각자 세면 「몇 단계」가 서로 다르게 나온다.
+        try:
+            from services.review import load as _review_ctx
+            rc = _review_ctx(s, ev_done.id)
+            if rc is not None:
+                next_stage = rc.next_stage
+                stage_line = " · ".join(
+                    f"{x.n}{x.title} " + ("건너뜀" if x.skipped else
+                                          "완료" if x.complete else f"{x.done}/{x.total}")
+                    for x in rc.states if x.n < 5)
+        except Exception:                                     # noqa: BLE001
+            log.warning("검토 단계 계산 실패 assessment=%s", ev_done.id, exc_info=True)
+
     dec = s.execute(text("""
         SELECT decision, reason, decided_by, recognized_hours, total_hours, decided_at
         FROM final_decision WHERE submission_id=:i
@@ -220,6 +240,7 @@ def case_state(s: Session, submission_id: int) -> CaseState | None:
         time=done_runs.get("time") or runs.get("time"),
         evidence=ev, evidence_done=ev_done, n_reviewed=n_reviewed,
         n_judge=n_judge, n_settled=n_settled, judged=judged,
+        next_stage=next_stage, stage_line=stage_line,
         decision=dict(dec) if dec else None,
     )
 
