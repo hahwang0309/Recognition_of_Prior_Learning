@@ -19,6 +19,14 @@ from typing import Any, Literal
 Severity = Literal["error", "warn"]
 NOT_PASSED = re.compile(r"미실시|미평가|불합격|미이수|해당\s*없음")
 
+# 정도를 말로 때우는 표현. 「50%를 크게 상회」는 몇 %인지 되짚을 수 없다.
+# 시간을 다투는 심사에서 「크게」는 근거가 되지 못하므로 숫자로 적게 한다.
+VAGUE = re.compile(
+    r"[^.。\n]{0,50}"
+    r"(크게 상회|상회하|훨씬|웃도[는니]|크게 웃|훌쩍|대폭|상당히|현저히|"
+    r"충분히 (?:넘|상회)|한참|대부분 확인|거의 다 확인)"
+    r"[^.。\n]{0,50}")
+
 
 @dataclass(frozen=True)
 class Issue:
@@ -275,6 +283,14 @@ def validate_track_b(package: dict, out: dict, rubric) -> ValidationReport:
             add("정성소견_누락", eid)
         elif len(qn) < 20:
             add("정성소견_부실", eid, qn[:30])
+
+        # 정도는 말이 아니라 숫자로. 「50%를 크게 상회」는 몇 %인지 되짚을 수 없다.
+        # 시간을 다투는 심사에서 「크게」는 근거가 되지 못한다.
+        for field in ("recommendation_reason", "qualitative_note"):
+            for m in VAGUE.finditer(el.get(field) or ""):
+                add("정도표현_모호", eid,
+                    f"{field}: …{m.group(0).strip()}… — 비율을 숫자로 적어야 한다",
+                    "warn")
 
     els = out.get("elements") or []
     rep.counts = {
