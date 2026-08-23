@@ -6,9 +6,11 @@ LLM 은 부르지 않는다. `ReplayClient` 가 실제 Opus 5 산출물(고정�
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import re
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -456,22 +458,42 @@ def test_worker_picks_up_track_b(monkeypatch):
 class _BrokenJSON:
     """JSON 이 깨진 응답을 돌려주는 가짜 클라이언트. 실호출에서 실제로 일어났다.
 
-    n_broken=None 이면 계속 깨뜨린다.
+    `n_broken` 은 **청크마다** 몇 번째 시도까지 깨뜨릴지다. None 이면 계속 깨뜨린다.
+
+    예전에는 전체 호출 수를 세어 「첫 호출만」 깨뜨렸다. 그런데 청크는 동시
+    4개로 돌므로 어느 청크가 첫 호출인지 매번 달라졌고, 세는 자리에 잠금도
+    없었다. 그래서 어떤 판정이 나올지 실행마다 흔들렸다 — 시험이 드물게
+    실패했고 원인을 짚기 어려웠다. 청크별로 세면 흔들리지 않는다.
     """
     def __init__(self, n_broken: int | None, good_dir=FIXTURES):
-        self.n_broken, self.calls = n_broken, 0
+        self.n_broken = n_broken
         self.good = ReplayClient(good_dir)
+        self._lock = threading.Lock()
+        self._tries: dict[str, int] = {}
+
+    @staticmethod
+    def _chunk_key(turn) -> str:
+        """이 호출이 어느 청크의 것인가. 요청 글 자체를 지문으로 쓴다."""
+        first = turn.messages[0] if turn.messages else ""
+        body = first if isinstance(first, str) else str(first.get("content", first))
+        return hashlib.sha256(body.encode()).hexdigest()[:16]
 
     def complete(self, turn, profile):
         if turn.purpose != "assess":              # 보조 호출은 건드리지 않는다
             return self.good.complete(turn, profile)
-        self.calls += 1
-        if self.n_broken is None or self.calls <= self.n_broken:
+        with self._lock:
+            k = self._chunk_key(turn)
+            self._tries[k] = n = self._tries.get(k, 0) + 1
+        if self.n_broken is None or n <= self.n_broken:
             good = self.good.complete(turn, profile)
             from krpl_core.llm import LLMResult
             return LLMResult(text=good.text[:len(good.text) // 2], model="claude-opus-5",
                              output_tokens=9000, cost_usd=1.2, stop_reason="end_turn")
         return self.good.complete(turn, profile)
+
+    @property
+    def calls(self) -> int:
+        return sum(self._tries.values())
 
 
 def test_unparseable_response_is_still_saved():
