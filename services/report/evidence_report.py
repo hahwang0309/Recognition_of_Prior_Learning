@@ -22,6 +22,9 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from services.catalog import label_of, labels
+from services.report.fids import label as fid_label
+from services.report.fids import listing as fid_listing
+from services.report.fids import meta_of
 from services.report.layout import page
 
 e = lambda x: html.escape(str(x) if x is not None else "")   # noqa: E731
@@ -255,10 +258,13 @@ def _plan(els: list[dict], lab: dict[tuple[str, str], str] | None = None
 
 
 def _element(x: dict, frags: dict[str, str],
-             lab: dict[tuple[str, str], str] | None = None) -> str:
+             lab: dict[tuple[str, str], str] | None = None,
+             fmeta: dict[str, tuple[str, str]] | None = None) -> str:
     """Ⅲ. 요소 하나 — 원본의 details.el 구조 그대로."""
-    p, lab = x["payload"], lab or {}
+    p, lab, fmeta = x["payload"], lab or {}, fmeta or {}
     eid = x["element_id"]
+    # 「D09-S09」만 적히면 무슨 자료인지 알 수 없다. 이름을 붙여 준다.
+    say = lambda z: fid_label(z, fmeta)      # noqa: E731
     cls, ico, name, _ = REC[x["recommendation"]]
     n_ksa_all = len(p.get("uncovered_ksa") or []) + len(p.get("evidence") or [])
     meta = " · ".join(filter(None, [
@@ -269,9 +275,9 @@ def _element(x: dict, frags: dict[str, str],
 
     b = ""
     if qn := p.get("qualitative_note"):
-        b += f'<p class="qn">{e(qn)}</p>'
+        b += f'<p class="qn">{e(say(qn))}</p>'
     if rr := p.get("recommendation_reason"):
-        b += f'<p class="reason"><b>권고 사유</b> {e(rr)}</p>'
+        b += f'<p class="reason"><b>권고 사유</b> {e(say(rr))}</p>'
     prov, miss = p.get("proven_dimensions") or [], p.get("missing_dimensions") or []
     if prov or miss:
         b += ('<p class="dims"><b>증명됨</b> ' + e(" · ".join(prov) or "없음")
@@ -281,8 +287,8 @@ def _element(x: dict, frags: dict[str, str],
     if pb.get("note"):
         b += (f'<div class="pb"><b>소속·기간 보증</b> '
               f'<span class="gs">{e("·".join(pb.get("grades") or []))}</span> '
-              f'<span class="fid">{e(",".join(pb.get("fids") or []))}</span>'
-              f'<div>{e(pb["note"])}</div></div>')
+              f'<span class="fid">{e(fid_listing(pb.get("fids") or [], fmeta))}</span>'
+              f'<div>{e(say(pb["note"]))}</div></div>')
 
     if ev := p.get("evidence"):
         b += f"<h5>증거 {len(ev)}건</h5>"
@@ -296,12 +302,12 @@ def _element(x: dict, frags: dict[str, str],
                   f'<span class="src g{g}">{e(g)}{" · " + e(doc) if doc else ""}'
                   f'{" · " + e(fids) if fids else ""}</span></div>'
                   f'<blockquote>{e(v.get("quote"))}</blockquote>'
-                  f'<div class="why">{e(v.get("why"))}</div></div>')
+                  f'<div class="why">{e(say(v.get("why")))}</div></div>')
 
     for n in p.get("negative_statements") or []:
         q = (n.get("quote") or n.get("text") or "") if isinstance(n, dict) else str(n)
         note = n.get("note") if isinstance(n, dict) else ""
-        b += f'<div class="neg">「{e(q)}」{f" — {e(note)}" if note else ""}</div>'
+        b += f'<div class="neg">「{e(say(q))}」{f" — {e(say(note))}" if note else ""}</div>'
     for c in p.get("conflicts") or []:
         if not isinstance(c, dict):
             b += f'<div class="con">{e(c)}</div>'
@@ -314,7 +320,7 @@ def _element(x: dict, frags: dict[str, str],
         if rj:
             line += f'<br>기각 {e(rg)} — {e(rj)}'
         if c.get("note"):
-            line += f'<br>{e(c["note"])}'
+            line += f'<br>{e(say(c["note"]))}'
         b += f'<div class="con">{line}</div>'
 
     for r in p.get("remediation") or []:
@@ -326,7 +332,7 @@ def _element(x: dict, frags: dict[str, str],
         alt = (f'<div class="alt">↳ 대체서류 제출 시 면제: {e(r["alt_document"])}</div>'
                if r.get("alt_document") else "")
         b += (f'<div class="rm {mcls}"><span class="mb">{e(r.get("method"))}</span>'
-              f'{e(r.get("item"))}<br><span class="why">{e(r.get("reason"))}</span>'
+              f'{e(say(r.get("item")))}<br><span class="why">{e(say(r.get("reason")))}</span>'
               f'{oral}{alt}</div>')
 
     return (f'<details class="el {cls}"><summary>'
@@ -366,6 +372,7 @@ def render_evidence(s: Session, assessment_id: int) -> str:
         WHERE program_id=:p"""), {"p": a["target_program_id"]})}
     # 「기술1」이 무슨 기술인지. 원본 확정본도 .kt 칸에 이 이름을 넣는다.
     lab = labels(s, [x["element_id"] for x in els])
+    fmeta = meta_of(s, sid)
     docs = [dict(r) for r in s.execute(text("""
         SELECT doc_type, grade, issuer, issued_on FROM document
         WHERE submission_id=:i ORDER BY grade, doc_key"""), {"i": sid}).mappings()]
@@ -414,7 +421,7 @@ def render_evidence(s: Session, assessment_id: int) -> str:
 
     detail = ""
     for u in ordered:
-        cards = "".join(_element(x, frags, lab) for x in
+        cards = "".join(_element(x, frags, lab, fmeta) for x in
                         sorted(u["els"], key=lambda z: z["element_id"]))
         detail += (f'<div class="ug"><h4>{e(u["name"])} '
                    f'<small>{u["hours"]}시간 · 요소 {len(u["els"])}개</small></h4>{cards}</div>')

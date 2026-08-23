@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -70,11 +71,21 @@ def review_all(aid, mapping=None) -> None:
 
 
 # ── 진행 상황 ──
-def test_summary_starts_empty(aid):
+def test_summary_starts_with_the_settled_ones_already_counted(aid):
+    """이수 기록으로 확정된 요소는 사람에게 묻지 않는다 — 처음부터 인정이다.
+
+    예전에는 이것을 「미검토」로 세어 두 가지가 어긋났다.
+      ① 「최종 판정 기록」 버튼이 영영 잠긴다 — 화면은 판단 대상만 시키는데
+         버튼은 요소 전부를 요구했다
+      ② 감면 시간이 낮게 나온다 — 검토 화면과 5단계 최종이 갈렸다
+    """
     with session_scope() as s:
         sm = review_summary(s, aid)
-    assert sm.n_elements == 33 and sm.n_reviewed == 0 and not sm.complete
-    assert sm.counts["미검토"] == 33 and sm.hours() == 0
+    assert sm.n_elements == 33
+    assert sm.n_settled > 0, "확정된 요소가 있어야 이 시험의 뜻이 산다"
+    assert sm.n_reviewed == sm.n_settled, "아직 사람은 아무것도 정하지 않았다"
+    assert sm.n_left == sm.n_to_judge == 33 - sm.n_settled
+    assert not sm.complete
     assert sm.total_hours == 410 and len(sm.units) == 10
 
 
@@ -240,7 +251,9 @@ def test_api_review_flow(client, aid):
                         {"i": aid}).scalar_one()
 
     d = client.get(f"/assessments/{aid}/review/summary").json()
-    assert d["complete"] is False and d["n_reviewed"] == 0
+    # 확정분은 이미 세어져 있다. 남은 것은 사람이 정할 몫이다.
+    assert d["complete"] is False
+    assert d["n_reviewed"] == d["n_settled"] and d["n_left"] > 0
     assert d["rule"] == "all_elements" and d["other_rule"] == "proportional"
 
     for eid, rec in pairs:
@@ -272,7 +285,16 @@ def test_api_blocks_premature_decision(client, aid):
     assert r.status_code == 409 and "검토가 끝나지 않았습니다" in r.json()["detail"]
     r = client.post(f"/submissions/{sid}/decision",
                     json={"assessment_id": aid, "decision": "부분인정", "allow_incomplete": True})
-    assert r.status_code == 200 and r.json()["recognized_hours"] == 0
+    assert r.status_code == 200
+    # 사람은 아직 아무것도 정하지 않았지만, 이수 기록으로 확정된 단위는 붙는다.
+    # 시간 대조와 같은 값이어야 한다 — 두 계산이 갈리면 어느 쪽을 믿을지 알 수 없다.
+    with session_scope() as s:
+        note = s.execute(text("""SELECT overall_note FROM assessment
+            WHERE submission_id=:i AND kind='time' ORDER BY id DESC LIMIT 1"""),
+            {"i": sid}).scalar()
+    if note:
+        h = json.loads(note)["hours"]
+        assert r.json()["recognized_hours"] == h["완전충족"] + h["조정범위내"]
 
 
 def test_api_rejects_mismatched_assessment(client, aid):

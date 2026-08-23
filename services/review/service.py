@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 
 from krpl_core.audit import AuditStore
 from krpl_core.config import get_rubric
+from services.review.triage import needs_judgment
 
 
 @dataclass
@@ -71,10 +72,22 @@ class ReviewSummary:
     n_elements: int = 0
     n_reviewed: int = 0
     n_expert_review: int = 0
+    # 사람이 묻지 않아도 되는 것 — 이수 기록으로 확정된 요소.
+    # n_reviewed 에 이미 포함돼 있고, 여기서는 「몇 개를 안 물었나」만 알려 준다.
+    n_settled: int = 0
+
+    @property
+    def n_to_judge(self) -> int:
+        """사람이 실제로 정해야 하는 요소 수."""
+        return self.n_elements - self.n_settled
+
+    @property
+    def n_left(self) -> int:
+        return max(0, self.n_elements - self.n_reviewed)
 
     @property
     def complete(self) -> bool:
-        return self.n_reviewed == self.n_elements and self.n_elements > 0
+        return self.n_left == 0 and self.n_elements > 0
 
     def hours(self, rule: str | None = None, conditional: bool = False) -> int:
         return round(sum(u.hours(rule or self.rule, conditional) for u in self.units))
@@ -128,15 +141,26 @@ def review_summary(s: Session, assessment_id: int) -> ReviewSummary:
         FROM catalog_wsd_required r WHERE r.program_id = :p"""),
         {"p": a["target_program_id"]})}
 
-    rows = list(s.execute(text("""
-        SELECT e.element_id, e.recommendation,
+    rows = [dict(r) for r in s.execute(text("""
+        SELECT e.element_id, e.recommendation, e.payload,
                COALESCE((e.payload->>'needs_expert_review')::bool, false) AS flag,
                v.decision
         FROM assessment_element e
         LEFT JOIN element_review v
                ON v.assessment_id = e.assessment_id AND v.element_id = e.element_id
         WHERE e.assessment_id = :i ORDER BY e.element_id"""),
-        {"i": assessment_id}).mappings())
+        {"i": assessment_id}).mappings()]
+
+    # 훈련이수증에 능력단위코드·시간·평가결과가 적혀 있어 규칙으로 확정된 요소는
+    # **묻지 않는다.** 그런데 여기서는 「미검토」로 세고 있어 두 가지가 어긋났다.
+    #   ① 「최종 판정 기록」 버튼이 영영 잠긴다 — 화면은 18개를 시켰는데
+    #      버튼은 27개를 요구했다
+    #   ② 감면 시간이 낮게 나온다 — 검토 화면 100h, 5단계 최종 250h 로 갈렸다
+    # 확정분은 인정으로 센다. `outcomes()`(5단계)가 이미 그렇게 하고 있다.
+    for r in rows:
+        if r["decision"] is None and not needs_judgment(r["payload"] or {}):
+            r["decision"] = "인정"
+            r["settled"] = True
 
     rolls: dict[str, UnitRoll] = {}
     counts = {d: 0 for d in rb.final_decision["element_decisions"]}
@@ -157,6 +181,7 @@ def review_summary(s: Session, assessment_id: int) -> ReviewSummary:
         units=sorted(rolls.values(), key=lambda u: (-u.required_hours, u.unit_code)),
         counts=counts, n_elements=len(rows),
         n_reviewed=sum(1 for r in rows if r["decision"]),
+        n_settled=sum(1 for r in rows if r.get("settled")),
         n_expert_review=sum(1 for r in rows if r["flag"]),
     )
 

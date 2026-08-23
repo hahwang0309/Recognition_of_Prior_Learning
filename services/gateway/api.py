@@ -292,6 +292,7 @@ def review_progress(aid: int, s: Session = Depends(get_session)):
         assessment_id=sm.assessment_id, case_number=sm.case_number,
         total_hours=sm.total_hours, n_elements=sm.n_elements, n_reviewed=sm.n_reviewed,
         n_expert_review=sm.n_expert_review, complete=sm.complete, counts=sm.counts,
+        n_settled=sm.n_settled, n_left=sm.n_left,
         rule=sm.rule, hours=sm.hours(), hours_conditional=sm.hours(conditional=True),
         hours_other_rule=sm.hours(other),
         hours_other_conditional=sm.hours(other, conditional=True), other_rule=other,

@@ -187,6 +187,10 @@ class ReviewSummaryOut(BaseModel):
     n_elements: int
     n_reviewed: int
     n_expert_review: int
+    # 사람에게 묻지 않은 것 — 이수 기록으로 확정된 요소. n_reviewed 에 포함돼 있다.
+    n_settled: int = 0
+    # 아직 정하지 않은 것. 화면이 이 수를 보고 어디로 데려갈지 정한다.
+    n_left: int = 0
     complete: bool
     counts: dict[str, int]
     rule: str = Field(description="감면 규칙 — all_elements | proportional")

@@ -19,6 +19,9 @@ from sqlalchemy.orm import Session
 
 from krpl_core.config import get_rubric
 from services.catalog import label_of, labels, pretty_ref
+from services.report.fids import label as fid_label
+from services.report.fids import listing as fid_listing
+from services.report.fids import meta_of
 from services.review import BUCKETS, SETTLED, review_summary, split
 
 e = lambda x: html.escape(str(x) if x is not None else "")   # noqa: E731
@@ -213,6 +216,13 @@ select,input.rs{font:inherit;font-size:12.8px;padding:5px 10px;border:1px solid 
 button.go{font:inherit;font-size:12.8px;padding:6px 18px;border-radius:7px;border:0;
  background:var(--tp);color:var(--s1);cursor:pointer}
 button.go:disabled{opacity:.4;cursor:not-allowed}
+/* 눌렀을 때 무엇이 모자란지 말하는 자리. 잠긴 버튼은 아무것도 말해 주지 못한다. */
+.gate{display:none;flex:1 1 100%;font-size:12.8px;color:var(--no);
+ background:rgba(208,59,59,.1);border-radius:7px;padding:7px 12px;margin-top:6px}
+/* 채워야 할 자리를 잠깐 밝힌다 */
+.want{outline:2px solid var(--no);outline-offset:3px;border-radius:8px;
+ animation:wink 1s ease-in-out 2}
+@keyframes wink{0%,100%{outline-color:var(--no)}50%{outline-color:transparent}}
 footer{color:var(--tm);font-size:11.5px;border-top:1px solid var(--bd);padding-top:14px;margin-top:28px}
 @media(max-width:680px){
  .el .hd{padding-left:15px}
@@ -226,9 +236,10 @@ footer{color:var(--tm);font-size:11.5px;border-top:1px solid var(--bd);padding-t
 
 def _evidence(ev: list[dict], frags: dict[str, str], eid: str,
               lab: dict[tuple[str, str], str], own_unit: str,
-              dtypes: dict[str, str] | None = None) -> str:
+              fmeta: dict[str, tuple[str, str]] | None = None) -> str:
     """근거 표. KSA 번호에는 실제 레이블을 붙이고, 자료와 원문을 열로 나눈다."""
     rows = ""
+    fmeta = fmeta or {}
     for x in ev:
         ref = x.get("ksa_ref") or ""
         label = label_of(lab, eid, ref)
@@ -255,9 +266,7 @@ def _evidence(ev: list[dict], frags: dict[str, str], eid: str,
         xu = (f'<span class="xu">⚠ 다른 능력단위({e(cross)}) 이수 기록</span>'
               if cross else "")
 
-        dtypes = dtypes or {}
-        kinds = list(dict.fromkeys(d for f in fids if (d := dtypes.get(f))))
-        src = " · ".join(kinds) + (" · " if kinds else "") + ", ".join(fids)
+        src = fid_listing(fids, fmeta) or ", ".join(fids)
         rows += (f'<tr><td><span class="ref">{e(pretty_ref(ref))}</span>'
                  f'<span class="lab">{e(label) or "&nbsp;"}</span></td>'
                  f'<td><q>{e(quote)}</q>'
@@ -272,13 +281,15 @@ def _evidence(ev: list[dict], frags: dict[str, str], eid: str,
             f'<tbody>{rows}</tbody></table>')
 
 
-def _uncovered(unc: list, eid: str, lab: dict[tuple[str, str], str]) -> str:
+def _uncovered(unc: list, eid: str, lab: dict[tuple[str, str], str],
+               fmeta: dict[str, tuple[str, str]] | None = None) -> str:
     """확인 안 된 항목 표. 번호만 적으면 무엇이 비었는지 알 수 없다.
 
     AI 가 남긴 `note`(왜 비었는지)를 통째로 버리고 있었다. 그것이 정작
     심사위원이 알아야 할 내용이다.
     """
     rows = ""
+    say = lambda x: fid_label(x, fmeta or {})    # noqa: E731
     for u in unc:
         ref = (u.get("ref") if isinstance(u, dict) else str(u)) or ""
         status = (u.get("status") if isinstance(u, dict) else "") or "미확보"
@@ -286,7 +297,7 @@ def _uncovered(unc: list, eid: str, lab: dict[tuple[str, str], str]) -> str:
         cls = "neg" if status == "부정진술" else "miss"
         rows += (f'<tr><td><span class="ref">{e(pretty_ref(ref))}</span>'
                  f'<span class="lab">{e(label_of(lab, eid, ref)) or "&nbsp;"}</span></td>'
-                 f'<td>{e(note) if note else "<span class=none>—</span>"}</td>'
+                 f'<td>{e(say(note)) if note else "<span class=none>—</span>"}</td>'
                  f'<td><span class="st2 {cls}">{e(status)}</span></td></tr>')
     return (f'<table class="et"><colgroup><col class="c1"><col class="c2">'
             f'<col class="c3"></colgroup>'
@@ -298,9 +309,12 @@ def _element(x: dict, frags: dict[str, str], rv: dict, names: dict[str, str],
              units: dict[str, str] | None = None,
              lab: dict[tuple[str, str], str] | None = None,
              hours: dict[str, int] | None = None,
-             dtypes: dict[str, str] | None = None) -> str:
+             dtypes: dict[str, str] | None = None,
+             fmeta: dict[str, tuple[str, str]] | None = None) -> str:
     units, lab, hours = units or {}, lab or {}, hours or {}
-    dtypes = dtypes or {}
+    dtypes, fmeta = dtypes or {}, fmeta or {}
+    # 「D09-S09」만 적히면 무슨 자료인지 알 수 없다. 이름을 붙여 준다.
+    say = lambda x: fid_label(x, fmeta)      # noqa: E731
     p = x["payload"]
     own_unit = x["element_id"].split("_")[0]
     cls, label, hint = REC.get(x["recommendation"], ("r5", x["recommendation"], ""))
@@ -313,14 +327,14 @@ def _element(x: dict, frags: dict[str, str], rv: dict, names: dict[str, str],
         body += (f'<div class="blk"><div class="t">근거 {len(ev)}건'
                  + (f' · 기준 KSA {len(ev) + len(p.get("uncovered_ksa") or [])}개 가운데'
                     if p.get("uncovered_ksa") else '')
-                 + f'</div>{_evidence(ev, frags, x["element_id"], lab, own_unit, dtypes)}</div>')
+                 + f'</div>{_evidence(ev, frags, x["element_id"], lab, own_unit, fmeta)}</div>')
 
     pb = p.get("period_backing") or {}
     if pb.get("note"):
         gs = pb.get("grades") or []
         g = " · ".join(f"{x} {GRADE_KO.get(x, '')}".strip() for x in gs) or "없음"
         body += (f'<div class="blk"><div class="t">소속·기간 뒷받침 — {e(g)}</div>'
-                 f'<div class="rem">{e(pb["note"])}</div></div>')
+                 f'<div class="rem">{e(say(pb["note"]))}</div></div>')
 
     pl = p.get("prior_learning") or {}
     if pl.get("applies"):
@@ -329,15 +343,15 @@ def _element(x: dict, frags: dict[str, str], rv: dict, names: dict[str, str],
                  f'(요구 {pl.get("required_hours") or "?"}시간) · {e(pl.get("evaluation"))}</div></div>')
 
     if neg := p.get("negative_statements"):
-        items = "".join(f'<div class="neg">“{e(n.get("quote"))}”'
-                        + (f'<br><span class="rem alt">{e(n.get("note"))}</span>' if n.get("note") else "")
+        items = "".join(f'<div class="neg">“{e(say(n.get("quote")))}”'
+                        + (f'<br><span class="rem alt">{e(say(n.get("note")))}</span>' if n.get("note") else "")
                         + "</div>" for n in neg)
         body += f'<div class="blk"><div class="t">본인이 「하지 않았다」고 밝힌 부분</div>{items}</div>'
 
     if unc := p.get("uncovered_ksa"):
         body += (f'<div class="blk"><div class="t">확인 안 된 항목 {len(unc)}개 — '
                  f'「부정진술」은 본인이 하지 않았다고 밝힌 것, 「미확보」는 자료가 '
-                 f'없는 것입니다</div>{_uncovered(unc, x["element_id"], lab)}</div>')
+                 f'없는 것입니다</div>{_uncovered(unc, x["element_id"], lab, fmeta)}</div>')
 
     if rem := p.get("remediation"):
         items = ""
@@ -349,20 +363,20 @@ def _element(x: dict, frags: dict[str, str], rv: dict, names: dict[str, str],
                 oral = f'<div class="alt">구술 확인<ul class="oral">{qs}</ul></div>' 
             alt = (f'<br><span class="alt">이 서류를 내면 갈음: {e(r["alt_document"])}</span>'
                    if r.get("alt_document") else "")
-            items += (f'<div class="rem"><b>{e(r.get("method"))}</b> — {e(r.get("item"))}'
-                      f'<br><span class="alt">{e(r.get("reason"))}</span>{oral}{alt}</div>')
+            items += (f'<div class="rem"><b>{e(r.get("method"))}</b> — {e(say(r.get("item")))}'
+                      f'<br><span class="alt">{e(say(r.get("reason")))}</span>{oral}{alt}</div>')
         body += f'<div class="blk"><div class="t">채우는 방법</div>{items}</div>'
 
     if cf := p.get("conflicts"):
         items = "".join(
             f'<div class="rem">{e(c.get("topic") or "자료 간 차이")} — 채택: {e(c.get("adopted"))}'
             + (f'<br><span class="alt">기각: {e(c["rejected"])}</span>' if c.get("rejected") else "")
-            + (f'<br><span class="alt">{e(c["note"])}</span>' if c.get("note") else "")
+            + (f'<br><span class="alt">{e(say(c["note"]))}</span>' if c.get("note") else "")
             + "</div>" for c in cf)
         body += f'<div class="blk"><div class="t">자료 간 어긋난 부분 (버리지 않고 남긴다)</div>{items}</div>'
 
     if qn := p.get("qualitative_note"):
-        body += f'<div class="note">{e(qn)}</div>'
+        body += f'<div class="note">{e(say(qn))}</div>'
 
     eid = x["element_id"]
     cur = rv.get(eid) or {}
@@ -410,7 +424,7 @@ def _element(x: dict, frags: dict[str, str], rv: dict, names: dict[str, str],
         onchange="mark(document.querySelector('#el-{e(eid)} .d.on'),'{e(eid)}')">
  <span class="saved"></span></div>
 <div class="dt">
- <p class="why">{e(p.get('recommendation_reason'))}
+ <p class="why">{e(say(p.get('recommendation_reason')))}
   <span class="ec">{hint}{' · 근거 확신 ' + conf if conf else ''}</span></p>
  {body}
 </div></div>"""
@@ -434,6 +448,8 @@ def render_review(s: Session, assessment_id: int) -> str:
     # fid 만으로는 무슨 서류인지 알 수 없다. 「D07-S03」보다 「경력기술서」가 낫다.
     dtypes = {r[0]: r[1] for r in s.execute(text(
         "SELECT fid, doc_type FROM fragment WHERE submission_id=:i"), {"i": a["sid"]})}
+    # {fid: (문서종류, 등급)} — 「D09-S09」에 「본인진술」을 붙이는 데 쓴다
+    fmeta = meta_of(s, a["sid"])
     # 요소 이름은 고시 원문에서 가져온다 — AI 가 적어 준 값보다 이쪽이 옳다
     names = {r[0]: r[1] for r in s.execute(text("""
         SELECT element_id, element_name FROM catalog_ncs_element
@@ -474,7 +490,7 @@ def render_review(s: Session, assessment_id: int) -> str:
             f'{d} {len(items)}개</button>'
             for d in (("인정",) if key == SETTLED else ("인정", "조건부인정")))
         cards = "".join(
-            _element(x, frags, rv, names, unit_names, lab, unit_hours, dtypes) for x in
+            _element(x, frags, rv, names, unit_names, lab, unit_hours, dtypes, fmeta) for x in
                         sorted(items, key=lambda y: (y["recommendation"], y["element_id"])))
         secs += f'''<details class="grp" {"open" if open_ else ""} data-k="{key}">
  <summary><span class="st {badge}">{e(title)}</span>
@@ -582,6 +598,7 @@ def render_review(s: Session, assessment_id: int) -> str:
  <input class="rs" id="why" placeholder="판정 사유" style="flex:1;min-width:180px"
         value="{e(fd['reason'] if fd else '')}">
  <button class="go" id="save">최종 판정 기록</button>
+ <div id="gate" class="gate"></div>
 </div></div>
 
 <script>
@@ -660,8 +677,11 @@ async function refresh(){{
  $('b-sug').textContent = d.complete ? `(권고안 ${{d.suggested}})`
    : `(남은 요소 ${{d.n_elements - d.n_reviewed}}개)`;
  $('dec').value = d.suggested;
- $('save').disabled = !d.complete;
- $('save').title = d.complete ? '' : '요소 검토를 모두 마쳐야 기록할 수 있습니다';
+ // 버튼을 잠그지 않는다. 잠긴 버튼은 왜 잠겼는지도, 무엇을 하면 되는지도
+ // 말해 주지 못한다 — 실제로 「다 찍었는데 안 눌린다」가 됐다.
+ LEFT = d.n_left;
+ $('save').textContent = d.complete ? '최종 판정 기록'
+   : `최종 판정 기록 (남은 ${{d.n_left}}개 확인)`;
 }}
 
 async function mark(btn, eid){{
@@ -687,8 +707,44 @@ async function mark(btn, eid){{
  refresh();
 }}
 
+let LEFT = 0;
+
+function jumpTo(el, why) {{
+ // 무엇을 채워야 하는지 보여 주고 그 자리로 데려간다.
+ el.scrollIntoView({{behavior: 'smooth', block: 'center'}});
+ el.classList.add('want');
+ setTimeout(() => el.classList.remove('want'), 2600);
+ if (el.focus) el.focus({{preventScroll: true}});
+ $('gate').textContent = why;
+ $('gate').style.display = 'block';
+ setTimeout(() => {{ $('gate').style.display = 'none'; }}, 6000);
+}}
+
 $('save').onclick = async () => {{
- const b = $('save'); b.disabled = true;
+ const b = $('save');
+
+ // ① 아직 정하지 않은 요소가 있으면 첫 번째로 데려간다
+ if (LEFT > 0) {{
+  const el = document.querySelector('.el:not(.done)');
+  if (el) {{
+   const grp = el.closest('details.grp');
+   if (grp) grp.open = true;
+   jumpTo(el, `아직 정하지 않은 요소가 ${{LEFT}}개 있습니다. 여기부터 정해 주십시오.`);
+   return;
+  }}
+ }}
+ // ② 검토자를 안 적었으면 그 칸으로
+ if (!$('who').value.trim()) {{
+  jumpTo($('who'), '누가 검토했는지 적어 주십시오. 감사 기록에 남습니다.');
+  return;
+ }}
+ // ③ 사유를 안 적었으면 그 칸으로
+ if (!$('why').value.trim()) {{
+  jumpTo($('why'), '판정 사유를 적어 주십시오. 나중에 왜 그렇게 정했는지 알 수 없습니다.');
+  return;
+ }}
+
+ b.disabled = true;
  try {{
   const r = await fetch(`/submissions/${{SID}}/decision`, {{
    method: 'POST', headers: {{'Content-Type': 'application/json'}},
@@ -701,6 +757,7 @@ $('save').onclick = async () => {{
   alert(r.ok ? `기록했습니다 — ${{d.decision}} · 감면 ${{d.recognized_hours}}시간`
              : `기록하지 못했습니다: ${{d.detail}}`);
  }} finally {{
+  b.disabled = false;
   refresh();
  }}
 }};
