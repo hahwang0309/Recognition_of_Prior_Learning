@@ -136,15 +136,47 @@ def render_case(s: Session, submission_id: int) -> str | None:
     if st.analyzing:
         pr = (ev.progress if ev else None) or {}
         n_done, n_all = pr.get("done", 0), pr.get("total", 0) or 1
+        pct = n_done / n_all * 100 if ev and ev.running else 0
+        step = (e(pr.get("phase") or "분석 중") if ev and ev.running
+                else "차례를 기다리는 중")
         bar = (f'<div class="prog"><div class="t"><div class="f" '
-               f'style="width:{n_done / n_all * 100:.0f}%"></div></div>'
-               f'<small>{n_done}/{n_all} 능력단위 · '
-               f'{e(pr.get("phase") or "분석 중")}</small></div>')
-        why = "제출 자료를 능력단위별로 읽고 있습니다. 6~30분 걸립니다."
-        if done:
-            why += " <em>지난 보고서는 그대로 보실 수 있습니다.</em>"
-        steps += _step("②", "근거 분석", _st("진행 중", "ac"), why,
-                       report_link or '<a href="">새로 고침</a>', now=True, extra=bar)
+               f'style="width:{pct:.0f}%"></div></div>'
+               f'<small id="prog-txt">'
+               + (f'{n_done}/{n_all} 능력단위 · {step}' if ev and ev.running
+                  else f'{step} — 시작 {st.queued_at:%H:%M:%S}')
+               + '</small></div>')
+        if st.stalled:
+            # 큐에 넣기만 하고 아무도 집지 않는다. 그대로 두면 영영 안 된다.
+            why = ("<b>판정 워커가 돌고 있지 않습니다.</b> 시작은 기록됐지만 "
+                   "아무도 집어 가지 않습니다.<br>터미널에서 아래를 실행하십시오 — "
+                   "그러면 이 건이 바로 시작됩니다."
+                   "<br><code style='font-size:12px'>./scripts/dev.sh worker</code>")
+            steps += _step("②", "근거 분석", _st("워커 없음", "no"), why,
+                           '<a href="">새로 고침</a>', now=True, extra=bar)
+        else:
+            why = ("차례를 기다리는 중입니다. 곧 시작됩니다."
+                   if st.waiting_in_queue else
+                   "제출 자료를 능력단위별로 읽고 있습니다. 6~30분 걸립니다.")
+            if done:
+                why += " <em>지난 보고서는 그대로 보실 수 있습니다.</em>"
+            steps += _step("②", "근거 분석",
+                           _st("대기 중" if st.waiting_in_queue else "진행 중", "ac"),
+                           why, report_link or '<a href="">새로 고침</a>',
+                           now=True, extra=bar)
+    elif ev is not None and ev.broke and not done:
+        # 끝났는데 쓸 수 없다. 이것을 감추면 「시작」 버튼만 다시 떠서
+        # 눌러도 아무 일이 없는 것처럼 보인다.
+        steps += _step("②", "근거 분석",
+                       _st("확인 필요" if ev.status == "manual_review" else "실패", "no"),
+                       f"{e(ev.trouble)}<em> 호출 {ev.attempts}회 · "
+                       f"{ev.finished_at:%m-%d %H:%M}</em>"
+                       "<br>같은 자료로 다시 돌리면 같은 곳에서 막힙니다. "
+                       "감사 기록에서 무엇이 어긋났는지 보실 수 있습니다.",
+                       f'<a href="/audit/{e(st.case_number)}">감사 기록</a>'
+                       f'<form method="post" action="/submissions/{sid}/analyze" '
+                       f'style="display:inline;margin-left:6px">'
+                       f'<button type="submit">다시 시도</button></form>',
+                       now=True)
     elif done:
         cost = f" · 비용 ${done.cost:.2f}" if done.cost else ""
         # 두 Run 은 서로 다른 조회에서 왔으므로 같은 판정이라도 객체가 다르다.
@@ -256,4 +288,23 @@ def render_case(s: Session, submission_id: int) -> str | None:
   <a href="/audit/{e(st.case_number)}">감사 기록 보기</a></div>
  {miss}
 </div>"""
-    return page(f"{st.case_number} 심사 개요", body, css=CSS, here="/cases")
+    scripts = ""
+    if st.analyzing:
+        # 3초마다 진행률만 긁어 막대를 움직이고, 끝나면 한 번 새로고침한다.
+        # 통째로 새로고침하면 스크롤이 튄다.
+        scripts = """<script>
+const SID = %d;
+async function tick() {
+  try {
+    const d = await (await fetch(`/submissions/${SID}/progress.json`)).json();
+    if (d.done) { location.reload(); return; }
+    const f = document.querySelector('.prog .f'), t = document.getElementById('prog-txt');
+    if (f) f.style.width = d.pct + '%%';
+    if (t) t.textContent = d.text;
+  } catch (e) { /* 잠깐 끊긴 것뿐이면 다음 차례에 다시 본다 */ }
+  setTimeout(tick, 3000);
+}
+setTimeout(tick, 3000);
+</script>""" % st.submission_id
+    return page(f"{st.case_number} 심사 개요", body, css=CSS, here="/cases",
+                scripts=scripts)

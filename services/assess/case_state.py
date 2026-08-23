@@ -19,6 +19,8 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from krpl_core.queue import worker_alive
+
 from services.review.triage import needs_judgment
 
 def _norm(s: str) -> str:
@@ -78,6 +80,29 @@ class Run:
     def running(self) -> bool:
         return self.status in ("running", "queued")
 
+    @property
+    def broke(self) -> bool:
+        """끝나긴 했는데 쓸 수 없는 상태.
+
+        `manual_review` 는 검증을 통과하지 못해 사람이 봐야 하는 것이고,
+        `failed` 는 도중에 죽은 것이다. 둘 다 done 도 running 도 아니라
+        화면에서 통째로 보이지 않았다 — 「시작」 버튼만 다시 떴다.
+        """
+        return self.status in ("manual_review", "failed")
+
+    @property
+    def trouble(self) -> str:
+        """무엇이 잘못됐는지 한 줄로."""
+        v = (self.note.get("validation") or {}) if isinstance(self.note, dict) else {}
+        by = v.get("by_code") or {}
+        if self.status == "manual_review":
+            got, want = v.get("n_elements"), v.get("n_expected")
+            head = (f"요소 {want}개 가운데 {got}개만 판단됐습니다"
+                    if got is not None and want else "기계 검증을 통과하지 못했습니다")
+            top = " · ".join(f"{k} {n}건" for k, n in list(by.items())[:3])
+            return head + (f" ({top})" if top else "")
+        return "분석이 도중에 멈췄습니다"
+
 
 @dataclass
 class CaseState:
@@ -92,6 +117,8 @@ class CaseState:
     n_documents: int
     n_fragments: int
     extra_docs: list[dict]                  # 근거 분석에 쓸 수 있는 자료
+    queued_at: datetime | None              # 큐에 든 근거 분석 작업 (아직 안 잡힘)
+    worker_ok: bool                         # 워커가 최근에 작업을 집었나
     time: Run | None                        # ① 시간 대조
     evidence: Run | None                    # ② 근거 분석 — **가장 최근** 실행
     # 이미 끝난 근거 분석. 새 실행이 도는 중이라도 지난 보고서는 계속 열려야 한다.
@@ -138,7 +165,23 @@ class CaseState:
 
     @property
     def analyzing(self) -> bool:
-        return bool(self.evidence and self.evidence.running)
+        """도는 중이거나 큐에서 기다리는 중.
+
+        큐를 보지 않았더니 「근거 분석 시작」을 눌러도 버튼이 그대로 있었다 —
+        워커가 집기 전에는 assessment 행이 없기 때문이다. 사용자는 아무 반응이
+        없다고 여기고 다시 눌렀고, 같은 작업이 두 건 쌓였다.
+        """
+        return bool(self.queued_at) or bool(self.evidence and self.evidence.running)
+
+    @property
+    def waiting_in_queue(self) -> bool:
+        """큐에 있는데 아직 아무도 집지 않았다."""
+        return bool(self.queued_at) and not (self.evidence and self.evidence.running)
+
+    @property
+    def stalled(self) -> bool:
+        """기다리는데 워커가 없다. 이대로 두면 영영 안 된다."""
+        return self.waiting_in_queue and not self.worker_ok
 
     # ── ③ 검토 ──
     # 진척은 **판단 대상**으로 센다. 훈련이수증으로 확정된 항목까지 한 줄씩
@@ -161,7 +204,14 @@ class CaseState:
         if self.n_documents == 0:
             return ("서류 올리기", f"/submissions/{self.submission_id}/upload")
         if self.analyzing:
+            if self.stalled:
+                return ("워커를 띄워야 합니다", f"/submissions/{self.submission_id}")
             return None                                  # 진행 중 — 기다린다
+        # 끝났는데 쓸 수 없는 것 — 목록에서도 「시작」이 아니라 그렇다고 말한다
+        if (self.evidence and self.evidence.broke
+                and not self.evidence_done):
+            word = "확인 필요" if self.evidence.status == "manual_review" else "분석 실패"
+            return (f"{word} — 열어 보기", f"/submissions/{self.submission_id}")
         if self.evidence_done:
             if not self.review_done:
                 return (f"검토하기 ({self.review_left}개 남음)",
@@ -255,6 +305,13 @@ def case_state(s: Session, submission_id: int) -> CaseState | None:
         except Exception:                                     # noqa: BLE001
             log.warning("검토 단계 계산 실패 assessment=%s", ev_done.id, exc_info=True)
 
+    # 큐에 든 작업. assessment 행은 워커가 집어야 생기므로, 그 전까지는
+    # 여기를 보지 않으면 「시작을 눌렀다」는 사실 자체가 화면에서 사라진다.
+    queued_at = s.execute(text("""
+        SELECT min(created_at) FROM job
+        WHERE kind='track_b' AND status='queued'
+          AND (payload->>'submission_id')::int = :i"""), {"i": submission_id}).scalar()
+
     dec = s.execute(text("""
         SELECT decision, reason, decided_by, recognized_hours, total_hours, decided_at
         FROM final_decision WHERE submission_id=:i
@@ -268,6 +325,7 @@ def case_state(s: Session, submission_id: int) -> CaseState | None:
         total_hours=sub["total_hours"] or 0,
         n_documents=len(docs), n_fragments=sum(d["n_frag"] for d in docs),
         extra_docs=[d for d in docs if not is_time_doc(d["doc_type"])],
+        queued_at=queued_at, worker_ok=worker_alive(s),
         time=done_runs.get("time") or runs.get("time"),
         evidence=ev, evidence_done=ev_done, n_reviewed=n_reviewed,
         n_judge=n_judge, n_settled=n_settled, judged=judged,

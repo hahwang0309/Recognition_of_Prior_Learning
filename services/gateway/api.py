@@ -656,8 +656,12 @@ def start_analysis(sid: int, s: Session = Depends(get_session)):
     st = case_state(s, sid)
     if st is None:
         raise HTTPException(404, "접수 건을 찾을 수 없습니다")
-    if st.evidence and (st.evidence.running or st.evidence.done):
+    # 이미 도는 중이거나 큐에서 기다리는 중이면 또 넣지 않는다.
+    # 화면이 아무 말도 안 하던 때, 사람이 다시 눌러 같은 작업이 두 건 쌓였다.
+    if st.analyzing or (st.evidence and st.evidence.done):
         return RedirectResponse(f"/submissions/{sid}", status_code=303)
+    # manual_review·failed 로 끝난 것은 다시 돌릴 수 있다 — 위 조건이 그것을
+    # 막지 않는다(done 도 running 도 아니므로).
     if not st.can_analyze:
         raise HTTPException(409, "근거 분석에 쓸 자료가 없습니다")
     enqueue(s, "track_b", {"submission_id": sid, "profile": None})
@@ -728,3 +732,31 @@ def guess_doc_types(body: GuessIn):
     """
     return [GuessOut(name=n, doc_type=g.doc_type, grade=g.grade, matched=g.matched)
             for n, g in zip(body.names, guess_many(body.names))]
+
+
+@app.get("/submissions/{sid}/progress.json")
+def case_progress(sid: int, s: Session = Depends(get_session)):
+    """근거 분석이 어디까지 왔나. 개요 화면이 3초마다 이것만 긁는다.
+
+    통째로 새로고침하면 스크롤이 튀고 열어 둔 것이 닫힌다.
+    """
+    st = case_state(s, sid)
+    if st is None:
+        raise HTTPException(404, "접수 건을 찾을 수 없습니다")
+    if not st.analyzing:
+        return {"done": True, "pct": 100, "text": "끝났습니다"}
+
+    ev = st.evidence
+    if st.waiting_in_queue:
+        text_ = ("판정 워커가 돌고 있지 않습니다 — ./scripts/dev.sh worker"
+                 if st.stalled else "차례를 기다리는 중")
+        return {"done": False, "pct": 0, "text": text_, "stalled": st.stalled}
+
+    pr = ev.progress or {}
+    n_done, n_all = pr.get("done", 0), pr.get("total", 0) or 1
+    left = pr.get("remaining") or []
+    tail = f" · {left[0]} 외 {len(left) - 1}" if len(left) > 1 else (
+        f" · {left[0]}" if left else "")
+    return {"done": False, "pct": round(n_done / n_all * 100),
+            "text": f"{n_done}/{n_all} 능력단위 · {pr.get('phase') or '분석 중'}{tail}",
+            "stalled": False}
