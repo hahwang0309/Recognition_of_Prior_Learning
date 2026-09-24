@@ -103,10 +103,14 @@ def render_dashboard(rows: list[dict], queue: dict, worker_ok: bool,
                 prog = (f'<div class="bar" data-run="{r["id"]}">'
                         f'<i style="width:0%"></i></div>'
                         f'<span class="mini" data-runtxt="{r["id"]}">시작 중…</span>')
+            elif r.get("n_judge"):
+                # 판단 대상만 센다 — 이수 기록으로 확정된 것은 누를 것이 없다.
+                done, need = r["n_judged"] or 0, r["n_judge"]
+                rest = f" · 기록 확정 {r['n_settled']}" if r.get("n_settled") else ""
+                prog = (f'<div class="bar"><i style="width:{done / need * 100:.0f}%"></i></div>'
+                        f'<span class="mini">검토 {done}/{need}{rest}</span>')
             elif r["n_el"]:
-                done = r["n_rev"] or 0
-                prog = (f'<div class="bar"><i style="width:{done / r["n_el"] * 100:.0f}%"></i></div>'
-                        f'<span class="mini">검토 {done}/{r["n_el"]}</span>')
+                prog = f'<span class="mini">요소 {r["n_el"]}개</span>' 
             fin = (f'<span class="st ok">{e(r["decision"])} '
                    f'{r["recognized_hours"]}/{r["total_hours"]}h</span>'
                    if r["decision"] else "")

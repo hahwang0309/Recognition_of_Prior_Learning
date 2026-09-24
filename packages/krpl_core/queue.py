@@ -92,16 +92,22 @@ def reclaim_stale(s: Session, minutes: int = 30) -> list[int]:
     return list(rows)
 
 
-def worker_alive(s: Session, minutes: int = 5) -> bool:
-    """최근에 작업을 집은 흔적이 있는가.
+def worker_alive(s: Session, minutes: int = 5, running_minutes: int = 30) -> bool:
+    """워커가 살아 있는가.
 
-    `status='running'` 만 보면 죽은 워커가 남긴 작업에 속는다.
-    **최근에 잠긴** 것이어야 살아 있다고 본다.
+    ① 최근 `minutes` 안에 작업을 집은 흔적이 있으면 살아 있다.
+    ② 지금 **돌고 있는** 작업이 있고 그것이 회수 한계 안이면 살아 있다.
+
+    ②가 없으면, 판정 하나가 30분 걸리는 동안 새로 집는 일이 없어 화면이
+    「워커가 죽었다」고 말한다. `status='running'` 만 보면 죽은 워커가 남긴
+    작업에 속으므로, 회수 한계(기본 30분)를 함께 본다 — 그보다 오래 잡혀
+    있으면 `reclaim_stale()` 이 도로 대기로 돌린다.
     """
     return bool(s.execute(text("""
         SELECT 1 FROM job
-        WHERE locked_at > now() - make_interval(mins => :m) LIMIT 1"""),
-        {"m": minutes}).first())
+        WHERE locked_at > now() - make_interval(mins => :m)
+           OR (status='running' AND locked_at > now() - make_interval(mins => :r))
+        LIMIT 1"""), {"m": minutes, "r": running_minutes}).first())
 
 
 def stuck(s: Session, minutes: int = 30) -> list[dict[str, Any]]:

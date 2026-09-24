@@ -57,14 +57,14 @@ def _rendered(kind: str) -> str:
 TRACK_A = {
     "가로 막대 행": re.compile(r'<div class="row" title="[^"]+">', re.S),
     "능력단위 코드": re.compile(r'<div class="nm"><span class="code">\d+</span>', re.S),
-    "막대 채움": re.compile(r'<div class="fill (good|warn|crit|none)" style="width:[\d.]+%"></div>', re.S),
+    "막대 채움": re.compile(r'<div class="fill (good|warn|hold|crit|none)" style="width:[\d.]+%"></div>', re.S),
     "−50% 하한 점선": re.compile(r'<div class="minl" style="left:[\d.]+%"></div>', re.S),
     "요구시간 실선": re.compile(r'<div class="reql" style="left:[\d.]+%"><span class="reqv">\d+h</span></div>', re.S),
-    "시간 표기": re.compile(r'<div class="hrs"><b>[^<]*</b><span>/\d+h</span></div>', re.S),
-    "아이콘+상태": re.compile(r'<div class="st (good|warn|crit|none)"><i>[●▲■○]</i>', re.S),
-    "누적 막대": re.compile(r'<div class="sg (good|warn|crit|none)" style="width:[\d.]+%"', re.S),
+    "시간 표기": re.compile(r'<div class="hrs"><b>[^<]*</b><span>/\d+h</span>(<em[^>]*>[^<]*</em>)?</div>', re.S),  # 2026-09-23 인정시간 줄 추가
+    "아이콘+상태": re.compile(r'<div class="st (good|warn|hold|crit|none)"><i>[●▲◆■○]</i>', re.S),
+    "누적 막대": re.compile(r'<div class="sg (good|warn|hold|crit|none)" style="width:[\d.]+%"', re.S),
     "KPI 강조": '<div class="kpi hl">',
-    "범례": '<div class="lgd">',
+    # 「범례」는 2026-09-23 요청으로 뺐다 — 위원이 볼 것은 인정·보류·불인정 카드와 막대뿐이다.
     "데이터 표": '<summary>데이터 표로 보기</summary>',
     "카드": '<section class="card">',
     "카드 머리": '<header class="ch">',
@@ -101,6 +101,36 @@ def test_track_a_keeps_confirmed_markup(name):
     origin, mine = _origin("trackA_보고서.html"), _rendered("time")
     assert _has(origin, pat), f"원본에 「{name}」 이 없다 — 시험 쪽이 틀렸다"
     assert _has(mine, pat), f"구현이 확정 포맷의 「{name}」 을 잃었다"
+
+
+PANEL = {
+    "카드 3장": re.compile(r'id="k-rec".*id="k-hold".*id="k-rej"', re.S),
+    "3점표": '<table class="tp">',
+    "항목별 인정 여부": "<h2>항목별 인정 여부</h2>",   # 위원 판정 라디오는 2026-09-23 뺐다
+    "파라미터 표": "판정 파라미터 — 위원 논의로 수정 가능",
+    "문서 열람창": 'id="dv"',
+    "방법론 코드 없음": None,
+}
+
+
+@pytest.mark.parametrize("name", sorted(PANEL))
+def test_track_b_panel_has_the_agreed_sections(name):
+    """1~3차 TF 가 요구한 것: 세 묶음 카드 · 능력단위 3점표 · 위원 판정 · 근거 체크 · 파라미터. R 코드는 안 보인다."""
+    from services.report import render_panel
+    with session_scope() as s:
+        aid = s.execute(text("SELECT id FROM assessment WHERE kind='evidence' ORDER BY id DESC LIMIT 1")).scalar()
+        if aid is None:
+            pytest.skip("근거 분석 결과 없음")
+        h = render_panel(s, aid)
+    pat = PANEL[name]
+    if pat is None:
+        body = re.sub(r"<script>.*</script>", "", h, flags=re.S)
+        body = re.sub(r"<[^>]+>", " ", body)
+        assert not re.search(r"\bR[0-5]\b", body), "위원 화면에 R 코드가 보인다"
+        assert not re.search(r"\bD\d{2}-[SP]\d+\b", body), "조각 번호가 풀리지 않고 보인다"
+        assert "fid" not in body.lower().replace("confidence", "")
+    else:
+        assert _has(h, pat), f"위원 페이지에 「{name}」 이 없다"
 
 
 @pytest.mark.parametrize("name", sorted(TRACK_B))
@@ -150,7 +180,7 @@ def test_track_a_colour_is_never_the_only_signal():
     """적록색약에서 초록·빨강은 ΔE 4.1 로 구분이 어렵다.
     그래서 모든 막대에 아이콘과 상태 텍스트를 함께 둔다."""
     h = _rendered("time")
-    marks = re.findall(r'<div class="st (\w+)"><i>([●▲■○])</i>([^<]+)</div>', h)
-    fills = re.findall(r'<div class="fill (\w+)"', h)
+    marks = re.findall(r'<div class="st (\w+)"><i>([●▲◆■○])</i>([^<]+)</div>', h)
+    fills = re.findall(r'<div class="fill (?!cred)(\w+)"', h)   # cred = 인정시간 층(2026-09-23), 상태 막대가 아니다
     assert len(marks) == len(fills), "아이콘·상태 텍스트가 없는 막대가 있다"
     assert all(ico and word.strip() for _, ico, word in marks)

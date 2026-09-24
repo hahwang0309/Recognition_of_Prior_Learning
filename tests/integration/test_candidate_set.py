@@ -49,10 +49,16 @@ def tiny(tmp_path: Path) -> Path:
 
 # ── 형식 검사 ─────────────────────────────────────────────────────
 
-def test_missing_manifest_says_so(tmp_path):
+def test_missing_manifest_falls_back_to_filenames(tmp_path):
+    """접수목록.csv 가 없으면 막지 않고 폴더의 문서를 파일명으로 분류한다 (2026-09-23).
+    문서가 하나도 없으면 그때 알려 준다."""
     (tmp_path / "신청서.yaml").write_text("심사번호: X\n", encoding="utf-8")
-    with pytest.raises(FileNotFoundError, match="접수목록.csv"):
+    with pytest.raises(ValueError, match="접수할 문서가 없습니다"):
         load_candidate.read_set(tmp_path)
+    (tmp_path / "05_경력증명서.txt").write_text("회사명 | ○○\n근무기간 | 2023.03 ~ 현재\n", encoding="utf-8")
+    (tmp_path / "00_사례_개요서.txt").write_text("연구진 예상 판정 — 넣으면 안 된다\n", encoding="utf-8")
+    _, docs = load_candidate.read_set(tmp_path)
+    assert [d["doc_type"] for d in docs] == ["경력증명서"] and docs[0]["grade"] == "B"
 
 
 def test_missing_application_says_so(tmp_path):
@@ -68,12 +74,13 @@ def test_file_named_in_manifest_must_exist(tiny):
         load_candidate.read_set(tiny)
 
 
-def test_unknown_grade_is_refused(tiny):
-    """등급은 기준서가 정한 A~E 뿐이다."""
+def test_unknown_grade_falls_back_to_the_type_default(tiny, capsys):
+    """등급이 비거나 틀리면 막지 않고 그 종류의 기본 등급으로 받는다 (2026-09-23: 접수는 다 받는다)."""
     _write_manifest(tiny, [{"파일": "경력기술서.txt", "종류": "경력기술서·자기소개서",
                             "신뢰도등급": "Z", "발급기관": "본인", "발급일": ""}])
-    with pytest.raises(ValueError, match="모르는 신뢰도 등급"):
-        load_candidate.read_set(tiny)
+    _, docs = load_candidate.read_set(tiny)
+    assert docs[0]["grade"] == "E"
+    assert "신뢰도 등급이 없어" in capsys.readouterr().err
 
 
 def test_unreadable_format_is_refused_before_ingest(tiny):
@@ -184,7 +191,7 @@ def test_the_real_set_lands_as_designed():
         note = s.execute(text("""SELECT overall_note FROM assessment
             WHERE submission_id=:i AND kind='time' ORDER BY id DESC LIMIT 1"""),
             {"i": sid}).scalar()
-    assert note, "시간 대조가 자동으로 돌지 않았다"
+    assert note, "기록 확인이 자동으로 돌지 않았다"
     d = json.loads(note)
     h = d["hours"]
     assert h["완전충족"] + h["조정범위내"] == 150, f"인정 150시간이어야 한다: {h}"
@@ -269,7 +276,7 @@ def test_the_candidate_can_be_filed_through_the_api():
 def test_screen_and_code_agree_on_document_kinds():
     """화면이 내미는 목록과 코드가 견주는 이름이 같아야 한다.
 
-    화면은 기준서의 `document_types` 를 그대로 내민다. 그런데 시간 대조가
+    화면은 기준서의 `document_types` 를 그대로 내민다. 그런데 기록 확인이
     쓰는 이름은 코드에 따로 적혀 있어 갈라졌다 — 화면으로 올린 이수증이
     「추가 자료」로 세어졌다. 이제 기준서(`time_source`)가 정한다.
     """
@@ -282,7 +289,7 @@ def test_screen_and_code_agree_on_document_kinds():
     for k in marked:
         assert is_time_doc(k), f"기준서가 표시한 {k} 를 코드가 못 알아본다"
     for k in set(dt) - marked:
-        assert not is_time_doc(k), f"표시 없는 {k} 가 시간 대조 자료로 잡힌다"
+        assert not is_time_doc(k), f"표시 없는 {k} 가 기록 확인 자료로 잡힌다"
 
 
 def test_legacy_free_text_names_still_match():
@@ -294,13 +301,14 @@ def test_legacy_free_text_names_still_match():
         assert not is_time_doc(other), other
 
 
-def test_manifest_kinds_come_from_the_rubric(tiny):
-    """접수목록에 자유 텍스트를 적으면 막는다 — 그래야 갈라지지 않는다."""
+def test_unknown_kind_is_received_as_기타(tiny, capsys):
+    """자유 텍스트 종류는 막지 않고 「기타」로 받는다. 인정 근거로 쓰려면 담당자가 종류를 지정한다
+    (2026-09-23: 접수는 무엇이든 받고, 필요한 것은 나중에 추가로 내게 한다)."""
     _write_manifest(tiny, [{"파일": "경력기술서.txt", "종류": "내 맘대로 지은 종류",
                             "신뢰도등급": "E", "발급기관": "본인", "발급일": ""}])
-    with pytest.raises(ValueError, match="모르는 서류 종류"):
-        load_candidate.read_set(tiny)
-
+    _, docs = load_candidate.read_set(tiny)
+    assert docs[0]["doc_type"] == "기타" and docs[0]["grade"] == "E"
+    assert "「기타」로 접수" in capsys.readouterr().err
 
 @pytest.mark.skipif(not (SRC / "접수목록.csv").exists(), reason="test/candidate01 이 없다")
 def test_the_real_manifest_uses_screen_vocabulary():
@@ -313,7 +321,7 @@ def test_the_real_manifest_uses_screen_vocabulary():
 
 @pytest.mark.skipif(not (SRC / "접수목록.csv").exists(), reason="test/candidate01 이 없다")
 def test_time_documents_are_not_counted_as_extra():
-    """이수증·편성표는 시간 대조가 이미 값을 뽑아 썼다. 두 번 세지 않는다."""
+    """이수증·편성표는 기록 확인이 이미 값을 뽑아 썼다. 두 번 세지 않는다."""
     from services.assess.case_state import case_state, is_time_doc
     cn, sid, _ = load_candidate.load(SRC)
     with session_scope() as s:

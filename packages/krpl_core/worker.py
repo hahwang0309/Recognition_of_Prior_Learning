@@ -40,13 +40,25 @@ class Worker:
             log.warning("멈춰 있던 작업 %d건을 회수했습니다: %s", len(ids), ids)
 
     def run_once(self) -> bool:
-        """작업 하나를 처리한다. 처리했으면 True, 큐가 비었으면 False."""
+        """작업 하나를 처리한다. 처리했으면 True, 큐가 비었으면 False.
+
+        ## 집었다는 표시는 **따로 커밋한다**
+
+        예전에는 집는 것과 처리하는 것이 한 트랜잭션이었다. 그래서 판정이
+        도는 6~30분 내내 밖에서는 그 작업이 `queued` 로 보였고 `locked_at`
+        도 비어 있었다. 화면은 「판정 워커가 돌고 있지 않습니다. 시작은
+        기록됐지만 아무도 집어 가지 않습니다」라고 말했다 — 워커는 바로
+        그 작업을 돌리고 있는데도.
+
+        죽으면 `running` 인 채로 남지만 그것은 `reclaim_stale()` 이 맡는다.
+        """
         job = None
         try:
+            with session_scope() as s0:
+                job = dequeue(s0, self.kinds)
+            if job is None:
+                return False
             with session_scope() as s:
-                job = dequeue(s, self.kinds)
-                if job is None:
-                    return False
                 self.handlers[job["kind"]](s, job["payload"])
                 complete(s, job["id"])
             log.info("job %s (%s) 완료", job["id"], job["kind"])

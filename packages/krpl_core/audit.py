@@ -34,7 +34,7 @@ from sqlalchemy.orm import Session
 from krpl_core.config import get_settings
 
 # 단계 이름 — 화면·CLI 가 이 순서로 보여준다
-STAGES = ["ingest", "package", "llm", "validate", "review", "decide"]
+STAGES = ["ingest", "package", "llm", "validate", "review", "panel", "plan", "decide"]   # panel·plan: 위원 제출·확인 계획 (2026-09-24)
 STAGE_KO = {"ingest": "① 문서 수집", "package": "② AI 입력 조립", "llm": "③ AI 분석",
             "validate": "④ 기계 검증", "review": "⑤ 전문가 검토", "decide": "⑥ 최종 판정"}
 
@@ -89,6 +89,19 @@ class AuditStore:
         # ON CONFLICT 를 쓰지 않는다. 수집 단계는 assessment_id 가 NULL 인데
         # PostgreSQL 의 UNIQUE 는 NULL 을 서로 다른 값으로 보므로 충돌이 잡히지 않는다.
         # 그러면 다시 수집할 때마다 색인 행이 쌓이고 옛 행이 낡은 해시를 물고 남는다.
+        vals = key | {"p": rel, "h": _sha(raw), "b": len(raw), "o": note}
+        if self.assessment_id is not None:
+            # 판정이 있는 단계는 UNIQUE 키에 NULL 이 없으므로 ON CONFLICT 가 잡힌다.
+            # 위원 화면이 저장을 연달아 보내면(라디오 + 근거 체크) 두 요청이 겹쳐
+            # DELETE→INSERT 사이에 서로 끼어들어 중복 키 오류(500)가 났다 (2026-09-23 실측).
+            return self.session.execute(text("""
+                INSERT INTO artifact (submission_id, assessment_id, stage, seq, name,
+                                      path, sha256, n_bytes, note)
+                VALUES (:s, :a, :g, :q, :n, :p, :h, :b, :o)
+                ON CONFLICT (submission_id, assessment_id, stage, seq, name) DO UPDATE
+                SET path=EXCLUDED.path, sha256=EXCLUDED.sha256, n_bytes=EXCLUDED.n_bytes,
+                    note=EXCLUDED.note, created_at=now()
+                RETURNING id"""), vals).scalar_one()
         self.session.execute(text("""
             DELETE FROM artifact
             WHERE submission_id=:s AND assessment_id IS NOT DISTINCT FROM :a
@@ -97,8 +110,7 @@ class AuditStore:
             INSERT INTO artifact (submission_id, assessment_id, stage, seq, name,
                                   path, sha256, n_bytes, note)
             VALUES (:s, :a, :g, :q, :n, :p, :h, :b, :o)
-            RETURNING id"""),
-            key | {"p": rel, "h": _sha(raw), "b": len(raw), "o": note}).scalar_one()
+            RETURNING id"""), vals).scalar_one()
 
     def manifest(self) -> dict[str, Any]:
         """이 건에 남은 산출물 목록. 해시를 붙여 위·변조를 확인할 수 있게 한다."""

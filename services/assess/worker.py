@@ -9,8 +9,11 @@ from services.assess.track_b_service import run_track_b
 
 HANDLERS = {
     "track_a": lambda s, p: run_track_a(s, p["submission_id"]),
+    # keep_from/focus 는 추가 서류를 받아 다시 돌릴 때만 온다.
     "track_b": lambda s, p: run_track_b(s, p["submission_id"],
-                                        profile_name=p.get("profile")),
+                                        profile_name=p.get("profile"),
+                                        keep_from=p.get("keep_from"),
+                                        focus=p.get("focus")),
 }
 
 if __name__ == "__main__":

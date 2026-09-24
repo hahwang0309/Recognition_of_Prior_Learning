@@ -116,11 +116,31 @@ def test_pressing_twice_queues_one_job(client, fresh):
 
 # ── ② 워커가 없으면 말하는가 ──────────────────────────────────────
 
+def test_a_fresh_job_is_not_called_stalled(client, fresh):
+    """방금 넣은 작업에 「아무도 집어 가지 않습니다」라고 하면 안 된다.
+    워커는 몇 초 간격으로 큐를 보고, 놀던 워커는 살아 있어도 최근에 집은
+    흔적이 없어 죽은 것으로 보인다."""
+    sid = fresh
+    _clear_worker_marks()
+    client.post(f"/submissions/{sid}/analyze", follow_redirects=False)
+    with session_scope() as s:
+        st = case_state(s, sid)
+    assert st.waiting_in_queue and not st.stalled, "갓 넣었는데 멈췄다고 한다"
+    h = client.get(f"/submissions/{sid}").text
+    assert "워커가 돌고 있지 않습니다" not in h
+    assert "차례를 기다리는 중" in h
+
+
 def test_a_stalled_queue_says_so(client, fresh):
     """큐에 넣기만 하고 아무도 집지 않으면 영영 안 된다. 그렇다고 말해야 한다."""
     sid = fresh
     _clear_worker_marks()
     client.post(f"/submissions/{sid}/analyze", follow_redirects=False)
+    # 넣은 지 한참 됐는데도 안 집혔을 때가 진짜 멈춘 것이다
+    with session_scope() as s:
+        s.execute(text("""UPDATE job SET created_at = now() - interval '10 minutes'
+            WHERE kind='track_b' AND status='queued'
+              AND (payload->>'submission_id')::int = :i"""), {"i": sid})
     with session_scope() as s:
         st = case_state(s, sid)
     if st.worker_ok:
@@ -187,9 +207,15 @@ def test_progress_endpoint_reports_the_running_step(client):
         pytest.skip("최신이 done 인 근거 분석이 없다")
     sid, aid = row
     # JSON 안의 : 을 SQLAlchemy 가 바인드 변수로 읽는다. 값으로 넘긴다.
+    #
+    # **판정이 실제로 적는 열쇠말을 그대로 쓴다.** 예전에는 여기서 영어
+    # 열쇠(done·total·phase)로 지어낸 값을 넣었다. 화면도 영어로 읽고 있었으니
+    # 시험은 통과했지만, 판정이 적는 것은 한글이라 실제 화면은 능력단위 일곱
+    # 개를 도는 내내 「0/1」이라고 말했다. 실측으로 드러났다.
     import json as _json
-    prog = _json.dumps({"done": 4, "total": 9, "phase": "분석 중",
-                        "remaining": ["가금 방역관리", "가금위생관리"]}, ensure_ascii=False)
+    prog = _json.dumps({"단계": "분석", "전체": 9, "완료": 4, "확정": 0,
+                        "남은": ["가금 방역관리", "가금위생관리"], "끝난": []},
+                       ensure_ascii=False)
     with session_scope() as s:
         s.execute(text("""UPDATE assessment SET status='running',
             progress=CAST(:p AS jsonb) WHERE id=:a"""), {"a": aid, "p": prog})
@@ -197,6 +223,7 @@ def test_progress_endpoint_reports_the_running_step(client):
         d = client.get(f"/submissions/{sid}/progress.json").json()
         assert not d["done"] and d["pct"] == 44
         assert "4/9" in d["text"] and "가금 방역관리" in d["text"]
+        assert "분석" in d["text"]
     finally:
         with session_scope() as s:
             s.execute(text("UPDATE assessment SET status='done' WHERE id=:a"), {"a": aid})

@@ -3,7 +3,7 @@
 접수번호를 누르면 감사 화면(파일 목록)이 열리던 것을 심사 개요로 바꿨다.
 그 흐름이 다시 어긋나지 않게 여기서 잡는다.
 
-  접수 → (자동) 시간 대조 → 심사 개요 → ① 시간 대조 보고서
+  접수 → (자동) 기록 확인 → 심사 개요 → ① 기록 확인 보고서
        → (자료가 있으면) 근거 분석 → ② 근거 분석 보고서 → ③ 검토
 """
 from __future__ import annotations
@@ -52,7 +52,7 @@ def client():
         yield c
 
 
-# ── 시간 대조 ────────────────────────────────────────────────────
+# ── 기록 확인 ────────────────────────────────────────────────────
 
 def test_time_comparison_runs_without_a_qualification(sid):
     """과정평가형 자격이 없어도 훈련 이수 기록으로 돈다.
@@ -128,7 +128,7 @@ def test_case_number_opens_the_overview(client, sid):
 
     h = client.get(f"/submissions/{sid}").text
     assert h.startswith("<!doctype html>") and CASE in h
-    for step in ("시간 대조", "근거 분석", "전문가 검토", "최종 판정"):
+    for step in ("기록 확인", "근거 분석", "전문가 검토", "최종 판정"):
         assert step in h, f"개요에 「{step}」 단계가 없다"
 
 
@@ -264,7 +264,7 @@ def test_analysis_offered_only_when_there_is_material(sid):
         st = case_state(s, sid)
     assert st.can_analyze, "경력·수행 자료가 있으면 분석을 권해야 한다"
     assert all(d["doc_type"] not in TIME_DOC_TYPES for d in st.extra_docs), \
-        "이수 증빙은 「추가 자료」로 세지 않는다 — 시간 대조가 이미 썼다"
+        "이수 증빙은 「추가 자료」로 세지 않는다 — 기록 확인이 이미 썼다"
 
 
 def test_analyze_redirects_back_to_the_overview(client, sid):
@@ -299,3 +299,88 @@ def test_review_counts_only_what_needs_judgment(client, sid):
         assert f"{st.n_settled}개" in overview
         assert f"{st.n_settled}개" in review
     assert f"{st.n_judge}개" in review
+
+
+# ── 면접 질문지·실기 과제는 어디 있나 ────────────────────────────
+
+def test_the_overview_names_the_five_stages(client, sid):
+    """「검토하기」 링크 하나뿐이면 면접 질문지와 실기 과제 목록이 어디
+    있는지 알 수 없다 — 실제로 그 질문을 받았다."""
+    h = client.get(f"/submissions/{sid}").text
+    st_ = None
+    with session_scope() as s:
+        st_ = case_state(s, sid)
+    if not st_.evidence_done:
+        pytest.skip("근거 분석 결과 없음")
+    assert '<div class="slinks">' in h, "다섯 단계로 가는 줄이 없다"
+    aid = st_.evidence_done.id
+    for n in range(1, 6):
+        assert f'href="/assessments/{aid}/review/{n}"' in h, f"{n}단계로 가는 길이 없다"
+    assert "면접 질문지" in h and "실기 과제" in h
+
+
+def test_the_gauge_says_where_the_hours_stand(client, sid):
+    """기록 확인만 읽어 「아직 확인되지 않은 시간」이 검토 뒤에도 그대로였다."""
+    h = client.get(f"/submissions/{sid}").text
+    with session_scope() as s:
+        st_ = case_state(s, sid)
+    if st_.decision and st_.decision.get("recognized_hours") is not None:
+        # 판정이 나면 막대는 그것을 따른다 — 아래 시험이 따로 본다
+        pytest.skip("최종 판정이 이미 났다")
+    if st_.split is None:
+        assert "기록으로 확인된 시간" in h
+    else:
+        assert f"지금까지 인정 <b>{st_.recognized_hours}</b>시간" in h
+        assert f"아직 확인되지 않은 시간 <b>{st_.unresolved_hours}</b>시간" in h
+        assert st_.recognized_hours + st_.unresolved_hours == st_.total_hours
+
+
+def test_the_screens_say_기록_확인_not_시간_대조(client, sid):
+    """「시간 대조」는 무엇을 대조하는지 모르는 말이었다."""
+    for url in (f"/submissions/{sid}", "/"):
+        h = client.get(url).text
+        assert "시간 대조" not in h, url
+
+
+def test_the_gauge_defers_to_the_recorded_decision(client, sid):
+    """막대는 370시간, ④ 칸은 300시간이라 말한 적이 있다.
+    최종 판정이 났으면 그것이 답이고, 계산과 다르면 그 차이를 적는다."""
+    with session_scope() as s:
+        st_ = case_state(s, sid)
+    h = client.get(f"/submissions/{sid}").text
+    if not st_.decision or st_.decision.get("recognized_hours") is None:
+        pytest.skip("최종 판정이 없다")
+    got = st_.decision["recognized_hours"]
+    assert f"인정 <b>{got}</b>시간" in h
+    if st_.split and st_.split.credited != got:
+        assert "심사위원이" in h and "정했습니다" in h
+
+
+def test_the_cost_covers_every_run(client, sid):
+    """재판정한 건은 마지막 실행분만 보이면 실제보다 싸 보인다
+    (실측 R2026-9010: $0.60 로 보였지만 처음 판정까지 합치면 $3.25)."""
+    with session_scope() as s:
+        st_ = case_state(s, sid)
+    if not st_.evidence_done:
+        pytest.skip("근거 분석 결과 없음")
+    assert st_.runs_attempts >= st_.evidence_done.attempts
+    assert st_.runs_cost >= (st_.evidence_done.cost or 0)
+    h = client.get(f"/submissions/{sid}").text
+    assert f"호출 {st_.runs_attempts}회" in h
+    if st_.n_runs > 1:
+        assert f"판정 {st_.n_runs}회" in h
+
+
+def test_the_case_list_counts_the_same_things_as_the_overview(client, sid):
+    """목록은 요소 전체로 세고 개요는 판단 대상으로 세면, 다 끝낸 건이
+    목록에서는 「22/30」으로 남아 보인다."""
+    with session_scope() as s:
+        st_ = case_state(s, sid)
+    if not st_.n_judge:
+        pytest.skip("판단 대상이 없다")
+    h = client.get("/cases").text
+    i = h.find(st_.case_number)
+    assert i >= 0
+    row = h[i:i + 1200]
+    assert f"검토 {st_.judged}/{st_.n_judge}" in row, "목록이 개요와 다르게 센다"
+    assert f"/{st_.n_elements}<" not in row

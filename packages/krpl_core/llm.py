@@ -141,7 +141,9 @@ class AnthropicClient:
         return out
 
     def _kwargs(self, turn: Turn, profile: ModelProfile) -> dict:
-        oc: dict[str, Any] = {"effort": profile.effort}
+        oc: dict[str, Any] = {}
+        if profile.effort:               # Haiku 4.5 는 effort 를 거부하므로 설정이 없으면 보내지 않는다
+            oc["effort"] = profile.effort
         if profile.structured_output:
             path = CONFIG_DIR / "schemas" / f"{profile.structured_output}.json"
             oc["format"] = {"type": "json_schema",
@@ -151,9 +153,10 @@ class AnthropicClient:
             "max_tokens": profile.max_tokens,
             "system": self._system(turn, profile),
             "messages": turn.messages,
-            "output_config": oc,
             "timeout": float(profile.timeout_sec),
         }
+        if oc:
+            kw["output_config"] = oc
         if profile.thinking:
             kw["thinking"] = profile.thinking
         return kw
@@ -244,7 +247,8 @@ class ReplayClient:
             body = aux.read_text(encoding="utf-8") if aux.exists() else json.dumps(
                 {"negation": {"affected": []},
                  "synthesize": {"prior_learning_review": "(재생) 기이수 반영 소견",
-                                "overall_note": "(재생) 전반 소견"}}[turn.purpose],
+                                "overall_note": "(재생) 전반 소견"},
+                 "plan": {"units": []}}[turn.purpose],
                 ensure_ascii=False)
             return LLMResult(text=body, model=f"replay:{profile.model}",
                              output_tokens=len(body) // 3, stop_reason="end_turn",

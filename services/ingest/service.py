@@ -157,11 +157,11 @@ def ingest_submission(s: Session, submission_id: int, documents: list[dict]) -> 
                       VALUES ('submission', :i, 'ingested', 'system', CAST(:d AS jsonb))"""),
               {"i": str(submission_id), "d": json.dumps(res.summary(), ensure_ascii=False)})
 
-    # 시간 대조는 결정론이고 초 단위로 끝난다. 사람이 시작 버튼을 누를 이유가 없다.
+    # 기록 확인는 결정론이고 초 단위로 끝난다. 사람이 시작 버튼을 누를 이유가 없다.
     # 여기서 실패해도 수집 자체는 유효하므로 접수를 통째로 되돌리지는 않는다.
     try:
         from services.assess.track_a_service import run_track_a
         run_track_a(s, submission_id)
     except Exception:                                    # noqa: BLE001
-        log.warning("시간 대조 자동 실행 실패 submission=%s", submission_id, exc_info=True)
+        log.warning("기록 확인 자동 실행 실패 submission=%s", submission_id, exc_info=True)
     return res

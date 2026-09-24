@@ -1,7 +1,7 @@
 """파일 이름으로 서류 종류를 알아맞힌다.
 
 담당자가 파일 열한 개의 종류를 하나씩 고르는 것은 지루하고, 지루하면 대충
-고른다. 종류를 잘못 고르면 등급도 따라 틀리고, 이수증을 놓치면 시간 대조가
+고른다. 종류를 잘못 고르면 등급도 따라 틀리고, 이수증을 놓치면 기록 확인이
 통째로 어긋난다.
 
 **틀리게 맞히는 것보다 못 맞혔다고 말하는 것이 낫다.**
@@ -55,7 +55,7 @@ def test_specific_beats_generic():
     """「비NCS_교육수료증」과 「수료증」이 같이 걸리면 구체적인 쪽이 맞다."""
     assert guess("비NCS_교육수료증.pdf").doc_type == "비NCS_교육수료증"
     assert guess("교육수료증.pdf").doc_type == "비NCS_교육수료증"
-    # 훈련이수증은 수료증이 아니다 — 능력단위 코드를 담고 있어 시간 대조에 쓰인다
+    # 훈련이수증은 수료증이 아니다 — 능력단위 코드를 담고 있어 기록 확인에 쓰인다
     assert guess("직업훈련 이수증.hwpx").doc_type == "NCS기반_훈련이수증"
 
 
@@ -98,3 +98,16 @@ def test_normalize_strips_the_noise():
     assert normalize("01_경력_증명서(최종).pdf") == "경력증명서"
     assert normalize("작업일지 발췌 20250114.txt") == "작업일지발췌"
     assert normalize("경력증명서 사본.hwp") == "경력증명서"
+
+
+def test_a_school_achievement_record_is_not_a_third_party_letter():
+    """「성취수준 확인서」는 학교·기관이 발급하는 교과 평가기록이다.
+    별칭이 없으면 「확인서」만 걸려 제3자_확인서(D등급)로 잡힌다 — 실측으로
+    학교 발급 서류가 D 로 들어가 판정 근거가 약해졌다."""
+    for name in ("교과목_성취수준_확인서.txt", "성취수준 평가기록.pdf",
+                 "능력단위 대응표.pdf", "자동차과 교과성취수준.hwpx"):
+        g = guess(name)
+        assert g.doc_type == "교육과정_편성표", f"{name} → {g.doc_type}"
+        assert g.grade == "B"
+    # 사람이 써 준 확인서는 여전히 제3자 진술이다
+    assert guess("정비반장_확인서.txt").doc_type == "제3자_확인서"

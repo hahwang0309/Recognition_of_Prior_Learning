@@ -47,7 +47,7 @@ def good():
             "prior_learning_review": "", "overall_note": "",
             "elements": [{
                 "element_id": "1301010101_20v1.1",
-                "evidence": [{"ksa_ref": "기술1", "fids": ["D02-S01"], "grade": "E",
+                "evidence": [{"ksa_ref": "기술1", "fids": ["D02-S01"], "grade": "E", "fit": "직접",
                               "quote": "밀가루 배합비를 계산해", "why": "직접 수행 진술"}],
                 "period_backing": {"fids": ["D01-R01"], "grades": ["B"], "note": "훈련기관 이수증"},
                 "prior_learning": {"applies": False},
@@ -175,13 +175,15 @@ def test_r1_flags_pending_rubric_decision(pkg, good, rb):
     el["recommendation"] = "R1"
     el["verification_method"] = "불필요"
     r = validate_track_b(pkg, good, rb)
-    assert r.by_code("warn") == {"기준미확정_R1": 1}
+    # 면접 항목에 질문이 없는 것도 경고다 — 이 고정자료가 실제로 그렇다.
+    assert r.by_code("warn")["기준미확정_R1"] == 1
     assert r.passed, "경고는 판정을 막지 않는다"
 
 
 def test_negative_statement_forces_r5(pkg, good, rb):
     good["elements"][0]["evidence_level"] = "부정진술"
-    assert codes(pkg, good, rb)["R8_불일치"] == 1
+    # 2026-09-23 R8 을 껐다 — 부정 진술은 판정에 쓰지 않는다. 검증기도 더 이상 잡지 않는다
+    assert codes(pkg, good, rb).get("R8_불일치", 0) == 0
 
 
 def test_r0_requires_prior_learning(pkg, good, rb):
@@ -251,11 +253,26 @@ def test_truncation_is_detected():
 
 
 def test_max_tokens_leaves_room_for_thinking():
-    """설정된 상한이 실측 소요를 충분히 덮는가.
-    실측(R2026-0002): 본문 약 38,000 + 사고 최대 20,000 토큰."""
+    """설정된 상한이 사고(thinking)를 빼고도 본문을 담을 수 있는가.
+    실측(R2026-0002, 청크 도입 전 한 번에 33요소): 본문 약 38,000 + 사고 최대 20,000 토큰 = 58,604.
+    청크(요소 3~5개) 방식에서는 응답 하나가 그보다 훨씬 작다. 모델별 출력 한도도 함께 확인한다."""
     from krpl_core.config import get_model_profile
     p = get_model_profile()
-    측정_최대 = 58_604
-    assert p.max_tokens >= 측정_최대 * 1.5, (
-        f"상한 {p.max_tokens:,} 이 실측 최대 {측정_최대:,} 의 1.5배에 못 미친다")
-    assert p.max_tokens <= 128_000, "claude-opus-5 의 출력 한도는 128,000"
+    한도 = {"claude-opus-5": 128_000, "claude-sonnet-5": 128_000, "claude-haiku-4-5": 64_000}
+    assert p.model in 한도, f"출력 한도를 모르는 모델 {p.model} — 표에 추가할 것"
+    assert p.max_tokens <= 한도[p.model], f"{p.model} 의 출력 한도는 {한도[p.model]:,}"
+    사고예약 = (p.thinking or {}).get("budget_tokens", 20_000)   # adaptive 면 실측 최대 20,000 으로 본다
+    assert p.max_tokens - 사고예약 >= 38_000, (
+        f"상한 {p.max_tokens:,} 에서 사고 {사고예약:,} 을 빼면 본문 실측 38,000 을 못 담는다")
+    if p.thinking and p.thinking.get("type") == "enabled":
+        assert 1_024 <= p.thinking["budget_tokens"] < p.max_tokens, "budget_tokens 는 1,024 이상, max_tokens 미만"
+    if p.model == "claude-haiku-4-5":
+        assert p.effort is None, "Haiku 4.5 는 output_config.effort 를 거부한다(400)"
+
+
+def test_evidence_fit_must_be_in_vocabulary(pkg, good, rb):
+    """근거 적합도(직접|간접|부정)는 필수 — 없거나 딴 값이면 재요청 (2026-09-24)."""
+    good["elements"][0]["evidence"][0]["fit"] = "약간"
+    assert codes(pkg, good, rb) == {"fit_어휘": 1}
+    del good["elements"][0]["evidence"][0]["fit"]
+    assert codes(pkg, good, rb) == {"fit_어휘": 1}

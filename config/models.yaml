@@ -4,29 +4,16 @@ default: trackb_assess
 profiles:
   trackb_assess:
     provider: anthropic
-    model: claude-opus-5
-    # 모델 한도는 128,000. 여기는 **상한**이지 예약이 아니므로 올려도 비용이 늘지 않는다.
-    # 64,000 으로 뒀을 때 실측: 2차 응답이 58,604 토큰(92%)을 써서 1차는 잘렸다.
-    #   응답 본문 ≈ 38,000 토큰 (요소 33개 기준)
-    #   + 사고(thinking) ≈ 0~20,000 토큰 — adaptive 라 판단이 어려울수록 늘어난다
-    # 잘리면 JSON 이 깨져 그 시도가 통째로 버려진다. 여유를 크게 둔다.
-    max_tokens: 120000
+    # 2026-09-23 Haiku 4.5 로 교체 (4·5차 집담회 시연·비용 절감). 정확한 ID: claude-haiku-4-5
+    #   (= 스냅샷 claude-haiku-4-5-20251001). 출력 상한 64,000 · 컨텍스트 200K.
+    #   Haiku 4.5 는 output_config.effort 를 받지 않는다(400) → effort: null 로 둔다.
+    #   thinking 은 adaptive 가 아니라 {type: enabled, budget_tokens: N} 방식. N < max_tokens, 최소 1024.
+    # Opus 로 되돌리려면 --profile trackb_assess_opus.
+    model: claude-haiku-4-5
+    max_tokens: 64000
     streaming: true                  # 출력 100KB 이상 — 타임아웃 방지
-    thinking: {type: adaptive}
-    # 실측(4건 × 2방식, 2026-08-22)으로 정한 값.
-    # 청크 하나는 요소 3~5개짜리 작은 작업이라 high 는 과했다.
-    #   high  : 사고 50,570 토큰 · $3.571 · 9분01초
-    #   medium: 사고 20,311 토큰 · $3.033 · 7분22초   ← 싸고 빠르다
-    # 판정 품질(권고 분포·근거 수)에는 유의미한 차이가 없었다.
-    effort: medium                   # low|medium|high|xhigh|max
-    # 구조화 출력(JSON 스키마 강제)은 끈다. 2026-08-21 실측 결과 이 스키마는 API 가 거부한다.
-    #   ① object 마다 additionalProperties:false 필요        → 고침
-    #   ② union 타입 21개 (한도 16)                          → 0개로 줄임
-    #   ③ "compiled grammar is too large"                    → 더 줄일 방법 없음
-    # 요소당 필수 항목 18개 × 중첩 배열이라 문법이 한도를 넘는다.
-    # 형식 강제가 없어도 계약은 지켜진다 — krpl_rules/track_b.py 가 원문과 직접 대조하며,
-    # 스키마보다 훨씬 강한 검사(인용문 일치·KSA 전수·기준서 철칙)를 한다.
-    # config/schemas/assessment_output.json 은 계약 문서로 남겨 둔다.
+    thinking: {type: enabled, budget_tokens: 16000}
+    effort: null                     # Haiku 4.5 는 effort 미지원. Opus/Sonnet 프로파일에서만 low|medium|high|xhigh|max
     structured_output: null
     cache:
       enabled: true
@@ -39,18 +26,35 @@ profiles:
     max_retries: 2
 
   # 비교·조정용 프로파일. `--profile` 로 그때그때 바꿔 쓴다.
+  trackb_assess_opus:                # 2026-09-23 이전 기본값. 실측(4건×2방식, 2026-08-22):
+    provider: anthropic              #   high 사고 50,570 토큰·$3.571·9분01초 / medium 20,311·$3.033·7분22초, 품질 차이 없음
+    model: claude-opus-5             # (상속은 한 단계 + 깊은 병합이라 thinking 이 섞이지 않도록 독립 정의)
+    max_tokens: 120000               # 모델 한도 128,000. 상한이지 예약이 아니라 올려도 비용은 안 는다
+    streaming: true
+    thinking: {type: adaptive}
+    effort: medium
+    structured_output: null
+    cache: {enabled: true, blocks: [prompt, rubric, applicant]}
+    timeout_sec: 900
+    max_retries: 2
+
   trackb_assess_high:
-    inherits: trackb_assess
+    inherits: trackb_assess_opus
     effort: high
 
   trackb_assess_low:
-    inherits: trackb_assess
+    inherits: trackb_assess_opus
     effort: low
+
+  trackb_plan:                       # 위원 제출 뒤 확인 계획 문안(면접 질문·시연 과제·시험 범위). 2026-09-24
+    inherits: trackb_assess
+    max_tokens: 16000
+    thinking: {type: enabled, budget_tokens: 4000}
+    cache: {enabled: false}
 
   trackb_assess_batch:               # 대량 재처리용 — 50% 절감
     inherits: trackb_assess
     use_batch_api: true
-    effort: medium
 
 # 1M 토큰당 USD. 캐시 읽기는 입력의 10%, 캐시 쓰기는 125%.
 pricing:

@@ -54,17 +54,22 @@ document_types:
     note: 내부평가 합격이 확인될 때만 역량수준 인정 → R0 대상
   교육과정_편성표:
     grade: B
-    aliases: [교육과정편성표, 편성표, 교과편성, 교육과정표]
+    # 「성취수준 확인서」는 학교·기관이 발급하는 교과 평가기록이다. 별칭을
+    # 안 달아 두면 「확인서」만 걸려 제3자_확인서(D등급)로 잡힌다 — 실측으로
+    # 학교 발급 서류가 D 로 들어가 판정 근거가 약해졌다. 긴 별칭이 이긴다.
+    aliases: [교육과정편성표, 편성표, 교과편성, 교육과정표,
+              성취수준확인서, 성취수준평가기록, 교과성취수준, 능력단위대응표,
+              교과목성취수준확인서]
     time_source: true
     proves: {직무명: full, 수행내용: full}
     note: 교과목↔능력단위 대응만 증명. 평가결과는 증명 못 함
   사내·기관_교육이수내역:
     grade: B
-    aliases: [사내교육, 기관교육, 교육이수내역, 사내연수, 직무교육]
+    aliases: [검정실시규정, 자격검정규정, 운영규정, 사내교육, 기관교육, 교육이수내역, 사내연수, 직무교육]
     proves: {신원: full, 소속·기간: full, 수행내용: partial, 최신성: partial}
   비NCS_교육수료증:
     grade: B
-    aliases: [비ncs교육수료증, 교육수료증, 수료증, 연수수료]
+    aliases: [비ncs교육수료증, 민간훈련수료증, 민간훈련, 민간교육, 교육과정안내, 커리큘럼, 학원수료, 교육수료증, 수료증, 연수수료]
     proves: {신원: full, 소속·기간: full, 수행내용: partial, 최신성: partial}
     note: 능력단위 대응 정보 없음 → R0 불가
   작업일지·업무일지:
@@ -81,8 +86,29 @@ document_types:
     proves: {소속·기간: partial, 직무명: full, 수행내용: partial, 역량수준: partial, 최신성: partial}
   경력기술서·자기소개서:
     grade: E
-    aliases: [경력기술, 자기소개, 자소서, 예비답변, 면접답변, 본인진술]
+    aliases: [학습경험기술서, 학습경험, 경험기술서, 경력기술, 자기소개, 자소서, 예비답변, 면접답변, 본인진술]
     proves: {소속·기간: partial, 직무명: full, 수행내용: full, 역량수준: partial}
+  # ── 2026-09-23 추가 (3차 TF · Track B 사례) ──
+  사업주자격증_정부인정:
+    grade: A
+    aliases: [정부인정사업주자격, 사업주자격정부인정, 기업자격정부인정]
+    proves: {신원: full, 직무명: full, 수행내용: partial, 역량수준: full, 최신성: partial}
+    note: 고용노동부 정부인정(고시 제2024-61호, 유효 3년) 사업주자격 — 출제·채점·사후관리 심사를 거침. 3차 TF 「국가 인정 자격에 준함」
+  사업주자격증:
+    grade: B
+    aliases: [사업주자격, 사내자격, 사업내자격, 기업자격, 자격검정합격증]
+    proves: {신원: full, 직무명: full, 수행내용: partial, 역량수준: partial, 최신성: partial}
+    note: 정부인정을 받지 않은 사업주자격 — 발급 주체가 회사 자신. 검정실시규정과 함께 볼 것
+  직무능력인정서:
+    grade: A
+    aliases: [직무능력인정, 직무능력은행, 인정서]
+    proves: {신원: full, 소속·기간: full, 직무명: partial, 최신성: full}
+    note: 직무능력은행 발급(법 제26조). 자격·훈련·교육·경력을 연계기관 전산으로 확인 — 경력증명서+4대보험 대체. 직무 내용·역량 수준은 담지 않는다
+  기타:
+    grade: D
+    aliases: []
+    proves: {}
+    note: 종류를 정하지 못한 문서. 접수는 받되 담당자가 종류·등급을 지정하기 전에는 인정 근거로 쓰지 않는다 — 보고서가 「추가 지정 필요」로 안내
 
 # ── 권고 구분 ──────────────────────────────────────────────────
 recommendations:
@@ -102,8 +128,7 @@ recommendations:
     requires:
       performance_proven: true
       period_backing_grades: [A, B]   # ★ 본인진술(E) 단독 R1 금지
-      negative_statements: false
-      ksa_coverage_min: null          # ⚠ 쟁점 4 — 미정. 확정 전에는 R1 판정 보류
+      ksa_coverage_min: 0.50          # ⚠ 쟁점 4 — 임시값(2026-09-23, Track A 인정선과 같은 50%). TF 결정 필요. 검증기가 실제 비율로 확인
   R2: {label: 면접확인,     action: 화상면접,      priority: 2}
   R3: {label: 실기확인,     action: 대면실기·시연,  priority: 3}
   R4: {label: 추가서류요청, action: 서류 보완,     priority: 4}
@@ -122,8 +147,8 @@ rules:
     resolution: higher_grade_wins
     discard_loser: false              # 모순 사실을 기록에 남김
   R8_negative_priority:
-    enabled: true
-    scope: element                    # ⚠ 쟁점 10 — element | ksa
+    enabled: false                    # 2026-09-23 삭제 — 「한 것만 매칭한다」. 부정 진술은 판정에 쓰지 않는다 (사용자 결정)
+    scope: element
     exception_core_ksa: false
   R12_prior_vs_recency:
     status: pending                   # ⚠ 쟁점 12
@@ -133,12 +158,17 @@ rules:
 # ── 훈련시간 ───────────────────────────────────────────────────
 training_hours:
   adjustment_floor: 0.50              # 고시 「−50%까지 조정 가능」
+  hold_floor: 0.30                    # ⚠ 2차 TF 제안 보류 구간 하한 — 미확정
   cbq_composition_range: {min: 0.80, max: 1.50}   # 과정평가형 편성 허용범위
 
 # ── Track A 판정 (결정론) ──────────────────────────────────────
-#   과정평가형 자격 등 NCS 기반 이수자. 능력단위·시간 대조만으로 판정한다.
+#   과정평가형 자격 등 NCS 기반 이수자. 능력단위·기록 확인만으로 판정한다.
 #   ratio = 이수시간 / 요구시간
 track_a:
+  # 2차 TF(2026-09-21) 논의 반영: 50% 이상은 조건 없이 그 단위 요구시간 전체 인정(운영매뉴얼 규칙),
+  # 30~50% 는 「보류」— 부족 이유와 추가 증빙을 안내하고 위원이 판단, 30% 미만·코드 불일치는 불인정.
+  # 보류 구간 자체는 미확정(pending_decisions). 대안으로 「자격 단위 인정」(국가 검정 자격은
+  # 코드 일치 단위를 시간과 무관하게 인정) 입장이 병존하므로 보고서에 참고값으로 함께 보인다.
   verdicts:                          # 위에서부터 먼저 맞는 것을 채택
     - id: 완전충족
       when: {ratio_gte: 1.0}
@@ -148,21 +178,46 @@ track_a:
       when: {ratio_gte: 0.50}        # training_hours.adjustment_floor 과 일치해야 함
       recommendation: R0
       verification: 불필요
-      note: 훈련기준 「−50%까지 조정 가능」 조항 적용
+      note: 훈련기준 「−50%까지 조정 가능」 조항 적용 — 요구시간 전체 인정
+    - id: 보류
+      when: {ratio_gte: 0.30}        # training_hours.hold_floor 과 일치해야 함 ⚠ 미확정
+      recommendation: R4
+      verification: 추가서류
+      note: 코드는 일치하나 이수시간이 하한(50%) 미만 — 추가 증빙 후 위원 판단 (2차 TF 보류 구간)
     - id: 시간부족
       when: {ratio_gt: 0.0}
-      recommendation: R2
-      verification: 화상면접
-      note: 능력단위는 이수했으나 시간이 하한 미만
+      recommendation: R5
+      verification: 훈련
+      note: 이수시간이 요구의 30% 미만 — 자동 불인정 (2차 TF)
     - id: 미이수
       when: {absent: true}
       recommendation: R5
       verification: 훈련
+  # 보고서·집계용 묶음. 인정 = 요구시간 전체 감면, 보류 = 위원 판단 대기, 불인정 = 훈련 이수.
+  buckets:
+    인정: [완전충족, 조정범위내]
+    보류: [보류]
+    불인정: [시간부족, 미이수]
+  # 보류 단위에 안내할 추가 증빙 — document_types 의 이름을 쓴다.
+  # 2차 TF 에서 거론된 것: 학습경험기술서, 기업현장교사(현장) 확인서, 현장 작업일지.
+  hold_evidence: [제3자_확인서, 작업일지·업무일지, 경력증명서, 사내·기관_교육이수내역, 경력기술서·자기소개서]
   confidence:
     # 과정평가형 편성시간은 기준값이며 기관이 80~150% 범위에서 편성한다.
     # 하한(80%)으로 계산해도 판정이 그대로면 확정, 바뀌면 추정.
     rule: recompute_with_composed_hours_min
     labels: {stable: 확정, unstable: 추정(이수증명 필요)}
+
+# ── Track B 위원 화면 (2026-09-23, 3차 TF 반영) ─────────────────
+track_b:
+  # 요소 권고를 위원용 세 묶음으로 접는다. 화면에는 R 코드가 나오지 않는다.
+  display_buckets:
+    인정후보: [R0, R1]
+    추가확인: [R2, R3, R4]
+    미인정: [R5]
+  # 3차 TF: 재현가능성(시연·구술)은 외부평가 몫. 실기(R3) 권고는 「외부평가에서 확인」으로 표시한다.
+  practical_to_external: true
+  # 3점 정량표의 축. 시간·기간은 문서에서 읽는 표시용 추정(time_axis) — App 본 계산이 아니다.
+  three_point_axes: [내용일치성, 시간기간, 검증가능성]
 
 # ── AI 산출물 어휘 ─────────────────────────────────────────────
 #   Track B 분석기가 쓸 수 있는 값의 전부. 검증기가 이 목록으로 대조한다.
@@ -171,6 +226,7 @@ output_vocabulary:
   evidence_level: [충분, 부분, 없음, 부정진술]
   verification_method: [불필요, 화상면접, 대면실기, 추가서류, 훈련]
   confidence: [high, medium, low]
+  evidence_fit: [직접, 간접, 부정]     # 근거 적합도 (2026-09-24). 직접 → 인정 · 간접 → 위원 판단 · 부정 → 불인정
 
 # ── 보완 부담 최소화 ───────────────────────────────────────────
 remediation:
@@ -234,8 +290,9 @@ final_decision:
 pending_decisions:
   - {key: recommendations.R1.requires.ksa_coverage_min, issue: 쟁점 4, urgency: critical}
   - {key: rules.R6_recency,                             issue: 쟁점 3, urgency: high}
-  - {key: rules.R8_negative_priority.scope,             issue: 쟁점 10, urgency: high}
   - {key: rules.R12_prior_vs_recency.winner,            issue: 쟁점 12, urgency: high}
   - {key: third_party_statement.family_written,         issue: 쟁점 5,  urgency: high}
   - {key: remediation.practical_max_per_applicant,      issue: D-6,    urgency: medium}
   - {key: final_decision.unit_credit_rule,              issue: D-7,    urgency: high}
+  - {key: track_a.verdicts.보류,                          issue: 2차TF 쟁점3, urgency: high}   # 30~50% 보류 구간 vs 자격 단위 인정
+  - {key: track_b.practical_to_external,                 issue: 3차TF 실기, urgency: medium}  # 실기(R3)를 외부평가에 맡길지

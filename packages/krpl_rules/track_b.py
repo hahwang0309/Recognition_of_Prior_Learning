@@ -113,6 +113,7 @@ def validate_track_b(package: dict, out: dict, rubric) -> ValidationReport:
     r1_grades = set(rubric.recommendations["R1"]["requires"]["period_backing_grades"])
     r0_floor = rubric.recommendations["R0"]["downgrade_if"]["completed_hours_ratio_below"]
     ksa_min_decided = rubric.is_decided("recommendations.R1.requires.ksa_coverage_min")
+    ksa_min = rubric.recommendations["R1"]["requires"].get("ksa_coverage_min")
 
     frags = {f["fid"]: f for f in package["fragments"]}
     elems: dict[str, dict] = {}
@@ -164,6 +165,8 @@ def validate_track_b(package: dict, out: dict, rubric) -> ValidationReport:
             fids = ev.get("fids") or []
             if not fids:
                 add("fid_없음", eid, f"ksa_ref={ev.get('ksa_ref')}")
+            if "evidence_fit" in vocab and ev.get("fit") not in set(vocab["evidence_fit"]):
+                add("fit_어휘", eid, f"ksa_ref={ev.get('ksa_ref')} fit={ev.get('fit')!r}")
             for fid in fids:
                 if fid not in frags:
                     add("fid_존재하지않음", eid, fid)
@@ -262,6 +265,16 @@ def validate_track_b(package: dict, out: dict, rubric) -> ValidationReport:
                     add("보완방법_오류", eid, repr(r.get("method")))
                 if not (r.get("item") or "").strip():
                     add("보완항목_공백", eid, str(r.get("method")))
+                # 면접은 질문지가 전부다. 질문 없는 면접 항목은 심사위원이
+                # 무엇을 물어야 할지 알 수 없다 — 실측 R2026-0004 에서 면접
+                # 11건에 질문이 하나도 없었고, 내용도 서류 요청이었다.
+                # 면접은 질문지가 전부다. 질문 없는 면접 항목은 심사위원이
+                # 무엇을 물어야 할지 알 수 없다 — 실측 R2026-0004 에서 면접
+                # 11건에 질문이 하나도 없었고 내용도 서류 요청이었다.
+                # 지금까지 나온 산출물이 다 그러므로 경고로 둔다. 지침을
+                # 고쳤으니 새로 도는 판정부터는 질문이 붙는다.
+                if r.get("method") == "면접" and not (r.get("oral_check") or []):
+                    add("면접_질문없음", eid, (r.get("item") or "")[:40], "warn")
                 for k in r.get("ksa_refs") or []:
                     if k not in M["refs"]:
                         add("보완_ksa없음", eid, k)
@@ -273,9 +286,15 @@ def validate_track_b(package: dict, out: dict, rubric) -> ValidationReport:
         # ── 기준서 철칙 ──
         if rec == "R1" and not (pb_grades & r1_grades):
             add("R1철칙_위반", eid, f"기간보증 등급 {sorted(pb_grades)} — {sorted(r1_grades)} 필요")
+        if rec == "R1" and ksa_min is not None and M["refs"]:
+            # 커버리지 = 근거가 붙은 KSA ÷ 요소의 KSA 전체. uncovered 는 위에서 모았다.
+            cov = 1 - len(_refs(el.get("uncovered_ksa"))) / len(M["refs"])
+            if cov < ksa_min:
+                add("R1_커버리지_미달", eid, f"KSA 커버리지 {cov:.0%} < 하한 {ksa_min:.0%}")
         if rec == "R1" and not ksa_min_decided:
-            add("기준미확정_R1", eid, "쟁점 4(KSA 커버리지 하한) 미확정 — 전문가 확인 필요", "warn")
-        if el.get("evidence_level") == "부정진술" and rec != "R5":
+            add("기준미확정_R1", eid, f"쟁점 4 — KSA 커버리지 하한 {ksa_min:.0%} 는 임시값, TF 결정 필요", "warn")
+        if (rubric.rules.get("R8_negative_priority", {}).get("enabled", True)
+                and el.get("evidence_level") == "부정진술" and rec != "R5"):
             add("R8_불일치", eid, f"부정진술인데 {rec}")
 
         qn = (el.get("qualitative_note") or "").strip()

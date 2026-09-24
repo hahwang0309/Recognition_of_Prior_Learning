@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from krpl_core.config import get_rubric
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
@@ -287,7 +288,7 @@ def test_api_blocks_premature_decision(client, aid):
                     json={"assessment_id": aid, "decision": "부분인정", "allow_incomplete": True})
     assert r.status_code == 200
     # 사람은 아직 아무것도 정하지 않았지만, 이수 기록으로 확정된 단위는 붙는다.
-    # 시간 대조와 같은 값이어야 한다 — 두 계산이 갈리면 어느 쪽을 믿을지 알 수 없다.
+    # 기록 확인과 같은 값이어야 한다 — 두 계산이 갈리면 어느 쪽을 믿을지 알 수 없다.
     with session_scope() as s:
         note = s.execute(text("""SELECT overall_note FROM assessment
             WHERE submission_id=:i AND kind='time' ORDER BY id DESC LIMIT 1"""),
@@ -332,7 +333,7 @@ def test_review_screen_renders(client, aid):
     assert "R0 기이수 인정검토" in h              # 코드만 두지 않고 뜻을 붙인다
     assert h.count('class="el') == 33
     assert "D01-R04" in h                        # 인용 출처
-    assert "확정 대기 중인 기준 항목이 7건" in h
+    assert f"확정 대기 중인 기준 항목이 {len(get_rubric().pending_decisions)}건" in h
 
 
 def test_screen_shows_saved_reviews(client, aid):
@@ -353,7 +354,7 @@ def test_screen_has_no_methodology_jargon(client, aid):
 
 
 def test_time_comparison_uses_its_own_report(client):
-    """시간 대조와 근거 분석은 화면이 다르다. 가르는 것은 assessment.kind 다.
+    """기록 확인과 근거 분석은 화면이 다르다. 가르는 것은 assessment.kind 다.
 
     예전에는 submission.track 으로 갈랐다. 그런데 한 접수 건이 둘 다 가질 수
     있게 되면서 그 기준으로는 갈리지 않는다.
@@ -362,7 +363,7 @@ def test_time_comparison_uses_its_own_report(client):
         aid = s.execute(text("""SELECT id FROM assessment WHERE kind='time'
                                 ORDER BY id DESC LIMIT 1""")).scalar()
     if aid is None:
-        pytest.skip("시간 대조 판정 없음")
+        pytest.skip("기록 확인 판정 없음")
     h = client.get(f"/assessments/{aid}/review").text
     # 제목은 연구팀이 회람·확정한 포맷을 따른다 (derived/trackA_보고서.html)
     assert "RPL Track A 심사 보고서" in h

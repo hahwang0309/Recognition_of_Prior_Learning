@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -20,12 +21,15 @@ from datetime import datetime
 from services.assess.case_state import case_state
 from services.report import (
     env_label, render_artifact, render_audit_case, render_audit_list,
-    render_case, render_dashboard, render_evidence, render_home, render_new,
+    render_case, render_dashboard, render_evidence, render_home, render_new, render_panel, render_plan,
     render_review, render_stage, render_stats, render_track_a, render_upload,
 )
 from services.review import (
-    record_decision, review_summary, save_element_review, save_result, set_stage,
+    receive_document, record_decision, review_summary, save_element_review,
+    save_result, set_stage,
 )
+from services.review.plan import submit as plan_submit
+from services.review import close as review_close
 from services.review import load as review_ctx
 from services.gateway.schemas import (
     AssessmentOut, AssessmentStatus, AssessRequest, BulkReviewIn, DecisionIn,
@@ -301,13 +305,35 @@ def review_progress(aid: int, s: Session = Depends(get_session)):
     )
 
 
+@app.get("/assessments/{aid}/panel", response_class=HTMLResponse)
+def panel(aid: int, s: Session = Depends(get_session)):
+    """위원 페이지 — 한 지원자 한 쪽 (인정·보류·불인정 · 3점표 · 항목별 인정 · 파라미터)."""
+    _need_assessment(s, aid)
+    return HTMLResponse(render_panel(s, aid))
+
+
+@app.post("/assessments/{aid}/panel/submit")
+def panel_submit(aid: int, reviewer: str | None = Form(None), s: Session = Depends(get_session)):
+    """위원 판정 제출 → 단위 판정 스냅샷 + 보류 단위 확인 계획(AI 1회) → 계획 페이지로."""
+    _need_assessment(s, aid)
+    plan_submit(s, aid, reviewer or None)
+    return RedirectResponse(f"/assessments/{aid}/plan", status_code=303)
+
+
+@app.get("/assessments/{aid}/plan", response_class=HTMLResponse)
+def plan_page(aid: int, s: Session = Depends(get_session)):
+    """확인 계획 — 보류 단위를 시험 · 시연/구현 · 면접으로 어떻게 확정할지 제안."""
+    _need_assessment(s, aid)
+    return HTMLResponse(render_plan(s, aid))
+
+
 @app.post("/assessments/{aid}/elements/{element_id}/review", response_model=ElementReviewOut)
 def save_review(aid: int, element_id: str, body: ElementReviewIn,
                 s: Session = Depends(get_session)):
     _need_assessment(s, aid)
     try:
         return ElementReviewOut(**save_element_review(
-            s, aid, element_id, body.decision, body.note, body.reviewer))
+            s, aid, element_id, body.decision, body.note, body.reviewer, body.excluded_evidence))
     except LookupError as ex:
         raise HTTPException(404, str(ex)) from ex
     except ValueError as ex:
@@ -326,7 +352,7 @@ def save_reviews(aid: int, body: BulkReviewIn, s: Session = Depends(get_session)
     try:
         for eid in body.element_ids:
             out.append(ElementReviewOut(**save_element_review(
-                s, aid, eid, body.decision, body.note, body.reviewer)))
+                s, aid, eid, body.decision, body.note, body.reviewer, body.excluded_evidence)))
     except LookupError as ex:
         raise HTTPException(404, str(ex)) from ex
     except ValueError as ex:
@@ -366,8 +392,9 @@ def make_decision(sid: int, body: DecisionIn, s: Session = Depends(get_session))
 @app.get("/submissions/{sid}/decision", response_model=DecisionOut)
 def get_decision(sid: int, s: Session = Depends(get_session)):
     r = s.execute(text("""SELECT submission_id, assessment_id, decision, recognized_hours,
-                          total_hours, credit_basis FROM final_decision
-                          WHERE submission_id=:i"""), {"i": sid}).mappings().first()
+                          total_hours, credit_basis, reason, decided_by
+                          FROM final_decision WHERE submission_id=:i"""),
+                  {"i": sid}).mappings().first()
     if r is None:
         raise HTTPException(404, "최종 판정이 아직 기록되지 않았습니다")
     return DecisionOut(**r)
@@ -538,6 +565,10 @@ def dashboard(s: Session = Depends(get_session)):
         r["next_step"] = st.next_step
         r["hours_note"] = (f"확인 {st.credited_hours}h / 총 {st.total_hours}h"
                            if st.time else f"총 {st.total_hours}h")
+        # 검토 진척은 **판단 대상**으로 센다. 요소 전체로 세면 이수 기록으로
+        # 확정된 것까지 세어, 다 끝낸 건이 「22/30」으로 남아 보인다.
+        r["n_judge"], r["n_judged"] = st.n_judge, st.judged
+        r["n_settled"] = st.n_settled
 
     return HTMLResponse(render_dashboard(
         rows, stats(s), worker_alive(s), len(get_rubric().pending_decisions),
@@ -601,6 +632,8 @@ def upload_files(sid: int,
     for n, (f, t, g) in enumerate(zip(files, doc_types, grades), start=seq + 1):
         if g not in rb.grades:
             raise HTTPException(422, f"모르는 신뢰도 등급입니다: {g}")
+        if t not in rb.document_types:
+            t = "기타"                     # 접수는 다 받는다. 종류 지정은 나중에 (2026-09-23)
         try:
             st = store(sub, f.filename or f"doc{n}", f.file.read(), n)
         except UploadRejected as ex:
@@ -628,12 +661,12 @@ def case_screen(sid: int, s: Session = Depends(get_session)):
 
 @app.get("/submissions/{sid}/report/time", response_class=HTMLResponse)
 def time_report(sid: int, s: Session = Depends(get_session)):
-    """① 시간 대조 보고서 — 기록으로 확인되는 이수 시간."""
+    """① 기록 확인 보고서 — 기록으로 확인되는 이수 시간."""
     aid = s.execute(text("""SELECT id FROM assessment
                             WHERE submission_id=:i AND kind='time'
                             ORDER BY id DESC LIMIT 1"""), {"i": sid}).scalar()
     if aid is None:
-        raise HTTPException(404, "시간 대조 결과가 없습니다. 서류를 먼저 올리세요")
+        raise HTTPException(404, "기록 확인 결과가 없습니다. 서류를 먼저 올리세요")
     return HTMLResponse(render_track_a(s, aid))
 
 
@@ -676,14 +709,23 @@ def start_analysis(sid: int, s: Session = Depends(get_session)):
 # 면접, 실기, 그리고 최종. 화면이 그 순서를 따라간다.
 
 @app.get("/assessments/{aid}/review/{stage}", response_class=HTMLResponse)
-def review_stage(aid: int, stage: int, s: Session = Depends(get_session)):
+def review_stage(aid: int, stage: int,
+                 받음: str | None = Query(None), 조각: int | None = Query(None),
+                 요소: int | None = Query(None),
+                 s: Session = Depends(get_session)):
     ctx = review_ctx(s, aid)
     if ctx is None:
         raise HTTPException(404, "근거 분석 결과를 찾을 수 없습니다")
     if not 1 <= stage <= 5:
         raise HTTPException(404, "1~5 단계만 있습니다")
     set_stage(s, aid, stage)
-    return HTMLResponse(render_stage(ctx, stage))
+    notice = ""
+    if 받음:
+        notice = (f"<b>{받음}</b>을(를) 받았습니다 — 조각 {조각 or 0}개를 수집했고, "
+                  f"이 서류가 걸린 요소 {요소 or 0}개를 다시 판정합니다.")
+    st = case_state(s, ctx.submission_id)
+    return HTMLResponse(render_stage(ctx, stage, notice=notice,
+                                     analyzing=bool(st and st.analyzing)))
 
 
 @app.post("/assessments/{aid}/remediation", response_model=RemediationOut)
@@ -721,6 +763,51 @@ def record_remediation(aid: int, body: RemediationIn,
         n_recognized=sum(1 for v in fresh.outcome_of.values() if v == "인정"))
 
 
+@app.post("/assessments/{aid}/items/{key}/document")
+def receive_item_document(aid: int, key: str,
+                          file: UploadFile = File(...),
+                          doc_type: str | None = Form(None),
+                          grade: str | None = Form(None),
+                          reviewer: str | None = Form(None),
+                          s: Session = Depends(get_session)):
+    """2단계 항목에 추가 서류를 붙인다.
+
+    받은 서류를 조각으로 수집하고, 그 서류가 풀려던 요소만 다시 판정한다.
+    면접·실기 항목과 질문지가 새 자료를 반영해 다시 만들어진다.
+    화면에서 온 요청이므로 끝나면 2단계로 돌려보낸다.
+    """
+    try:
+        r = receive_document(s, aid, key, file.filename or "서류",
+                             file.file.read(), doc_type=doc_type, grade=grade,
+                             reviewer=reviewer)
+    except UploadRejected as ex:
+        raise HTTPException(422, f"{file.filename}: {ex}") from ex
+    except LookupError as ex:
+        raise HTTPException(404, str(ex)) from ex
+    except ValueError as ex:
+        raise HTTPException(422, str(ex)) from ex
+    return RedirectResponse(
+        f"/assessments/{aid}/review/2?받음={quote(r.doc_type)}&조각={r.n_fragments}"
+        f"&요소={len(r.focus)}", status_code=303)
+
+
+@app.post("/assessments/{aid}/stages/{stage}/close")
+def close_stage(aid: int, stage: int, s: Session = Depends(get_session)):
+    """단계를 마감한다. 손대지 않은 것만 기본값으로 확정한다.
+
+    항목마다 찍게 하는 대신 단계마다 한 번 누르게 한다 — 올린 것은 받은
+    것이고 안 올린 것은 못 받은 것이다.
+    """
+    try:
+        c = review_close(s, aid, stage)
+    except LookupError as ex:
+        raise HTTPException(404, str(ex)) from ex
+    except ValueError as ex:
+        raise HTTPException(422, str(ex)) from ex
+    return {"stage": c.stage, "settled": c.settled, "already": c.already,
+            "total": c.total}
+
+
 @app.post("/doc-types/guess", response_model=list[GuessOut])
 def guess_doc_types(body: GuessIn):
     """파일 이름으로 서류 종류를 알아맞힌다.
@@ -753,11 +840,9 @@ def case_progress(sid: int, s: Session = Depends(get_session)):
                  if st.stalled else "차례를 기다리는 중")
         return {"done": False, "pct": 0, "text": text_, "stalled": st.stalled}
 
-    pr = ev.progress or {}
-    n_done, n_all = pr.get("done", 0), pr.get("total", 0) or 1
-    left = pr.get("remaining") or []
+    n_done, n_all, phase, left = ev.steps
     tail = f" · {left[0]} 외 {len(left) - 1}" if len(left) > 1 else (
         f" · {left[0]}" if left else "")
-    return {"done": False, "pct": round(n_done / n_all * 100),
-            "text": f"{n_done}/{n_all} 능력단위 · {pr.get('phase') or '분석 중'}{tail}",
+    return {"done": False, "pct": round(n_done / n_all * 100) if n_all else 0,
+            "text": f"{n_done}/{n_all or '?'} 능력단위 · {phase}{tail}",
             "stalled": False}

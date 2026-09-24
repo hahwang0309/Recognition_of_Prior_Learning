@@ -177,6 +177,7 @@ class Rubric(BaseModel):
     recommendations: dict[str, dict[str, Any]]
     rules: dict[str, dict[str, Any]]
     training_hours: dict[str, Any]
+    track_b: dict[str, Any] = Field(default_factory=dict)   # 위원 화면 묶음·표시 규칙 (2026-09-23)
     track_a: dict[str, Any]
     output_vocabulary: dict[str, list[str]]
     final_decision: dict[str, Any]
@@ -235,7 +236,7 @@ class ModelProfile(BaseModel):
     max_tokens: int
     streaming: bool = True
     thinking: dict[str, Any] | None = None
-    effort: str = "high"
+    effort: str | None = "high"      # None 이면 output_config.effort 를 보내지 않는다 (Haiku 4.5)
     structured_output: str | None = None
     cache: dict[str, Any] = Field(default_factory=dict)
     timeout_sec: int = 900

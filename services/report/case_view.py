@@ -28,11 +28,16 @@ CSS = """
 .gauge .line .dim{color:var(--tm)}
 .bar2{display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--s3)}
 .bar2 .yes{background:var(--ok)}
+.bar2 .exp{background:var(--ok);opacity:.5}
 .bar2 .maybe{background:var(--ac)}
+.bar2 .todo{background:var(--ac);opacity:.35}
 .leg{display:flex;gap:16px;font-size:11.5px;color:var(--tm);margin-top:7px;flex-wrap:wrap}
 .leg i{display:inline-block;width:11px;height:11px;border-radius:3px;
  margin-right:5px;vertical-align:-1px;font-style:normal}
 .leg .yes{background:var(--ok)}.leg .maybe{background:var(--ac)}.leg .no{background:var(--s3)}
+.leg .exp{background:var(--ok);opacity:.5}
+.leg .todo{background:var(--ac);opacity:.35}
+.gauge .line.dim{color:var(--tm)}
 
 /* 네 단계. 번호·제목·상태가 한 줄, 설명과 버튼이 그 아래. */
 .step{display:grid;grid-template-columns:30px 1fr auto;gap:0 12px;
@@ -64,19 +69,111 @@ CSS = """
  background:var(--s3);color:var(--ts);margin-left:6px;vertical-align:1px}
 .miss{margin-top:10px}
 .miss summary{cursor:pointer;font-size:12.8px;color:var(--ac)}
+/* 다섯 단계로 바로 가는 줄 — 면접 질문지·실기 과제가 여기 있다 */
+.slinks{grid-column:2;display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+.slinks a{font-size:12.2px;padding:4px 10px;border-radius:14px;
+ border:1px solid var(--bd);background:var(--s1);color:var(--ts);white-space:nowrap}
+.slinks a:hover{border-color:var(--tm);text-decoration:none}
+.slinks a em{font-style:normal;color:var(--tm);margin-left:4px;font-size:11.3px}
+.slinks a.done{color:var(--tm)}
+.slinks a.now{border-color:var(--ac);color:var(--tp);font-weight:600}
 .miss table{margin-top:8px}
 """
 
 
-def _bar(st: CaseState) -> str:
+def _gauge(st: CaseState) -> str:
+    """시간이 지금 어디에 놓여 있는지 한 눈에.
+
+    예전에는 기록 확인 결과만 읽었다. 그래서 전문가가 100시간을 더 인정한
+    뒤에도 「아직 확인되지 않은 시간」이 그대로 300시간이라고 적혀 있었다
+    (실측 R2026-9002: 450시간 중 기록 150 + 전문가 100, 남은 것은 200시간).
+    검토가 시작됐으면 그 결과까지 읽는다.
+    """
     tot = st.total_hours or 1
-    yes = st.credited_hours / tot * 100
-    maybe = 0.0
-    if st.evidence_done:
-        # 근거 분석이 「인정 검토」로 본 시간까지 파랗게 — 아직 확정은 아니다.
-        maybe = min(100 - yes, st.open_hours / tot * 100)
-    return (f'<div class="bar2"><div class="yes" style="width:{yes:.2f}%"></div>'
-            f'<div class="maybe" style="width:{maybe:.2f}%"></div></div>')
+    sp = st.split
+    if sp is None:
+        # 아직 검토 전 — 기록 확인이 남긴 것만 말할 수 있다.
+        yes = st.credited_hours / tot * 100
+        maybe = min(100 - yes, st.open_hours / tot * 100) if st.evidence_done else 0.0
+        return (
+            f'<div class="line">기록으로 확인된 시간 <b>{st.credited_hours}</b>시간'
+            f' <span class="dim">/ {st.total_hours}시간 ({st.credited_ratio:.0%})</span>'
+            f'&nbsp;·&nbsp; 아직 확인되지 않은 시간 <b>{st.open_hours}</b>시간</div>\n'
+            f' <div class="bar2"><div class="yes" style="width:{yes:.2f}%"></div>'
+            f'<div class="maybe" style="width:{maybe:.2f}%"></div></div>\n'
+            f' <div class="leg"><span><i class="yes"></i>이수 기록으로 확인</span>'
+            + (f'<span><i class="maybe"></i>제출 자료로 따져 볼 수 있음</span>'
+               if maybe else "")
+            + f'<span><i class="no"></i>{"훈련으로 채워야 함" if st.evidence_done else "아직 확인 안 됨"}</span></div>')
+
+    # 최종 판정이 났으면 그것이 답이다. 계산값과 다르면 그 차이도 적는다 —
+    # 실측 R2026-9010 에서 막대는 370시간, ④ 칸은 300시간이라 말했다.
+    dec = st.decision or {}
+    fixed = dec.get("recognized_hours")
+    if fixed is not None:
+        pct = fixed / sp.total * 100 if sp.total else 0
+        gap = sp.credited - int(fixed)
+        note = (f' <span class="dim">검토 계산은 {sp.credited}시간이었고, '
+                f'심사위원이 {abs(gap)}시간을 '
+                f'{"빼고" if gap > 0 else "더해"} 정했습니다.</span>' if gap else "")
+        return (
+            f'<div class="line">최종 판정 <b>{e(str(dec.get("decision") or ""))}</b>'
+            f' · 인정 <b>{fixed}</b>시간'
+            f' <span class="dim">/ {sp.total}시간 ({pct:.0f}%)</span>{note}</div>\n'
+            f' <div class="line">훈련으로 채워야 할 시간 <b>{sp.total - int(fixed)}</b>시간'
+            f' <span class="dim">· 기록 확인 {sp.record}시간 + 전문가 판단 {sp.expert}시간'
+            f' 으로 확인된 것 가운데 정한 것입니다</span></div>\n'
+            f' <div class="bar2"><div class="yes" style="width:{pct:.2f}%"></div></div>\n'
+            f' <div class="leg"><span><i class="yes"></i>인정</span>'
+            f'<span><i class="no"></i>훈련으로 채워야 함</span></div>')
+
+    # 검토가 시작된 뒤 — 다섯 칸으로 가른다. 합은 언제나 총 필수 시간이다.
+    # 0시간짜리 칸은 범례에서 뺀다 — 색이 없는데 이름만 있으면 헷갈린다.
+    leg = "".join(
+        f'<span><i class="{c}"></i>{n}</span>'
+        for h, c, n in ((sp.record, "yes", "이수 기록으로 확인"),
+                        (sp.expert, "exp", "전문가 판단으로 인정"),
+                        (sp.pending, "maybe", "면접·실기·추가서류로 확인"),
+                        (sp.unjudged, "todo", "아직 판단 전"),
+                        (sp.training, "no", "훈련으로 채워야 함")) if h)
+    parts = []
+    if sp.unjudged:
+        parts.append(f"검토가 남은 {sp.unjudged}시간")
+    if sp.pending:
+        parts.append(f"면접·실기·추가서류로 확인할 {sp.pending}시간")
+    if sp.training:
+        parts.append(f"훈련으로 채워야 할 {sp.training}시간")
+    if len(parts) > 1:
+        rest = "= " + " + ".join(parts)
+    elif sp.training:
+        rest = "— 확인으로 풀리는 것은 없습니다. 훈련으로 채워야 합니다"
+    elif sp.pending:
+        rest = "— 모두 면접·실기·추가서류로 확인할 수 있습니다"
+    elif sp.unjudged:
+        rest = ("— 아직 1단계 판단이 남았습니다. 여기서 무엇을 면접·실기로 "
+                "볼지 갈립니다")
+    else:
+        rest = ""
+    how = ""
+    if sp.methods:
+        # 한 단위에 면접·실기가 둘 다 걸릴 수 있어 겹쳐 센다. 그렇다고 적는다.
+        ms = " · ".join(f"{e(m)} {h}시간" for m, h in
+                        sorted(sp.methods.items(), key=lambda x: -x[1]))
+        dup = " — 한 단위에 둘이 걸린 곳이 있어 겹쳐 셌습니다" if len(sp.methods) > 1 else ""
+        how = (f'<div class="line dim" style="font-size:12.5px">'
+               f'기계가 제안한 확인 방법 — {ms}{dup}</div>')
+    return (
+        f'<div class="line">지금까지 인정 <b>{sp.credited}</b>시간'
+        f' <span class="dim">/ {sp.total}시간 ({sp.pct(sp.credited):.0f}%)'
+        f' &nbsp;= 기록 확인 {sp.record}시간 + 전문가 판단 {sp.expert}시간</span></div>\n'
+        f' <div class="line">아직 확인되지 않은 시간 <b>{sp.open}</b>시간'
+        f' <span class="dim">{rest}</span></div>\n'
+        f' {how}\n'
+        f' <div class="bar2"><div class="yes" style="width:{sp.pct(sp.record):.2f}%"></div>'
+        f'<div class="exp" style="width:{sp.pct(sp.expert):.2f}%"></div>'
+        f'<div class="maybe" style="width:{sp.pct(sp.pending):.2f}%"></div>'
+        f'<div class="todo" style="width:{sp.pct(sp.unjudged):.2f}%"></div></div>\n'
+        f' <div class="leg">{leg}</div>')
 
 
 def _step(no: str, title: str, badge: str, why: str, act: str = "",
@@ -90,6 +187,38 @@ def _step(no: str, title: str, badge: str, why: str, act: str = "",
 </div>"""
 
 
+# 다섯 단계로 바로 들어가는 줄. 「검토하기」 한 개만 있으면 면접 질문지와
+# 실기 과제 목록이 어디 있는지 알 수 없다 — 실제로 그런 질문을 받았다.
+WHAT = {2: "요청할 서류", 3: "면접 질문지", 4: "실기 과제"}
+
+
+def _stage_links(st: CaseState, aid: int) -> str:
+    if not st.stages:
+        return ""
+    out = ""
+    for x in st.stages:
+        n = x["n"]
+        if x["skipped"]:
+            note = (f"{x['moot']}건 · 결과 안 바뀜" if x.get("moot")
+                    else "해당 없음")
+        elif n == 5:
+            note = "보기"
+        elif x["complete"]:
+            note = f"{x['done']}/{x['total']} 완료"
+        else:
+            note = f"{x['done']}/{x['total']}"
+        cls = "sl done" if x["complete"] else ("sl now" if n == st.next_stage else "sl")
+        what = WHAT.get(n)
+        # 무엇이 들어 있는 단계인지 이름을 붙여 준다
+        # 건너뛴 단계라도 볼 것이 남아 있으면 이름을 붙인다 — 면접 질문지가
+        # 어디 있는지 묻는 사람에게 「3 면접」만으로는 답이 되지 않는다.
+        has = (not x["skipped"]) or x.get("moot")
+        title = f"{x['title']} · {what}" if what and has else x["title"]
+        out += (f'<a class="{cls}" href="/assessments/{aid}/review/{n}">'
+                f'{n} {e(title)} <em>{e(note)}</em></a>')
+    return f'<div class="slinks">{out}</div>'
+
+
 def _st(text: str, kind: str = "") -> str:
     return f'<span class="st {kind}">{e(text)}</span>'
 
@@ -101,7 +230,7 @@ def render_case(s: Session, submission_id: int) -> str | None:
     sid = st.submission_id
     steps = ""
 
-    # ── ① 시간 대조 ────────────────────────────────────────────────
+    # ── ① 기록 확인 ────────────────────────────────────────────────
     if st.time and st.time.done:
         n = st.time.note.get("근거", {})
         src = []
@@ -115,15 +244,15 @@ def render_case(s: Session, submission_id: int) -> str | None:
         if st.skipped:
             why += (f' <em>이수 기록을 낸 {len(st.skipped)}개 단위는 갈음되지 '
                     f'않았습니다 — 아래에 이유를 적었습니다.</em>')
-        steps += _step("①", "시간 대조", _st("완료", "ok"), why,
+        steps += _step("①", "기록 확인", _st("완료", "ok"), why,
                        f'<a href="/submissions/{sid}/report/time">보고서 보기</a>')
     elif st.n_documents == 0:
-        steps += _step("①", "시간 대조", _st("대기"),
+        steps += _step("①", "기록 확인", _st("대기"),
                        "제출 자료가 없습니다. 서류를 올리면 자동으로 대조합니다.",
                        f'<a class="go" href="/submissions/{sid}/upload">서류 올리기</a>',
                        now=True)
     else:
-        steps += _step("①", "시간 대조", _st("안 돌았음", "no"),
+        steps += _step("①", "기록 확인", _st("안 돌았음", "no"),
                        "자동 실행이 실패했습니다. 서류를 다시 올리면 재시도합니다.",
                        f'<a href="/submissions/{sid}/upload">서류 다시 올리기</a>', now=True)
 
@@ -134,15 +263,13 @@ def render_case(s: Session, submission_id: int) -> str | None:
     report_link = (f'<a href="/submissions/{sid}/report/evidence">보고서 보기</a>'
                    if done else "")
     if st.analyzing:
-        pr = (ev.progress if ev else None) or {}
-        n_done, n_all = pr.get("done", 0), pr.get("total", 0) or 1
-        pct = n_done / n_all * 100 if ev and ev.running else 0
-        step = (e(pr.get("phase") or "분석 중") if ev and ev.running
-                else "차례를 기다리는 중")
+        n_done, n_all, phase, _left = ev.steps if ev else (0, 0, "", [])
+        pct = n_done / n_all * 100 if ev and ev.running and n_all else 0
+        step = e(phase) if ev and ev.running else "차례를 기다리는 중"
         bar = (f'<div class="prog"><div class="t"><div class="f" '
                f'style="width:{pct:.0f}%"></div></div>'
                f'<small id="prog-txt">'
-               + (f'{n_done}/{n_all} 능력단위 · {step}' if ev and ev.running
+               + (f'{n_done}/{n_all or "?"} 능력단위 · {step}' if ev and ev.running
                   else f'{step} — 시작 {st.queued_at:%H:%M:%S}')
                + '</small></div>')
         if st.stalled:
@@ -154,7 +281,7 @@ def render_case(s: Session, submission_id: int) -> str | None:
             steps += _step("②", "근거 분석", _st("워커 없음", "no"), why,
                            '<a href="">새로 고침</a>', now=True, extra=bar)
         else:
-            why = ("차례를 기다리는 중입니다. 곧 시작됩니다."
+            why = ("차례를 기다리는 중입니다. 몇 초 안에 시작됩니다."
                    if st.waiting_in_queue else
                    "제출 자료를 능력단위별로 읽고 있습니다. 6~30분 걸립니다.")
             if done:
@@ -178,7 +305,9 @@ def render_case(s: Session, submission_id: int) -> str | None:
                        f'<button type="submit">다시 시도</button></form>',
                        now=True)
     elif done:
-        cost = f" · 비용 ${done.cost:.2f}" if done.cost else ""
+        # 재판정한 건은 마지막 실행분만 보이면 실제보다 싸 보인다.
+        cost = f" · 비용 ${st.runs_cost:.2f}" if st.runs_cost else ""
+        again = (f" · 판정 {st.n_runs}회(추가 서류 반영)" if st.n_runs > 1 else "")
         # 두 Run 은 서로 다른 조회에서 왔으므로 같은 판정이라도 객체가 다르다.
         # `is not` 로 비교했다가 실패한 적이 없는데도 실패했다고 적었다. id 로 본다.
         warn = ('<em> 다시 돌린 분석이 끝나지 못했습니다 — 아래는 지난 결과입니다.</em>'
@@ -186,7 +315,7 @@ def render_case(s: Session, submission_id: int) -> str | None:
         steps += _step("②", "근거 분석", _st("완료", "ok"),
                        f"추가 자료 {len(st.extra_docs)}종에서 "
                        f"<b>{done.n_elements}개 항목</b>을 판단했습니다."
-                       f"<em> 호출 {done.attempts}회{cost}</em>{warn}",
+                       f"<em> 호출 {st.runs_attempts}회{cost}{again}</em>{warn}",
                        report_link)
     elif st.can_analyze:
         kinds = "·".join(sorted({d["doc_type"] for d in st.extra_docs})[:3])
@@ -194,7 +323,7 @@ def render_case(s: Session, submission_id: int) -> str | None:
                   if ev else "")
         steps += _step("②", "근거 분석", _st("할 수 있음", "wn"),
                        f"경력·수행을 보여 주는 자료가 <b>{len(st.extra_docs)}건</b> 있습니다"
-                       f"({e(kinds)} 등). 시간 대조로 덮이지 않은 "
+                       f"({e(kinds)} 등). 기록 확인으로 덮이지 않은 "
                        f"<b>{st.open_hours}시간</b>을 이 자료로 따져 볼 수 있습니다.{failed}",
                        f'<form method="post" action="/submissions/{sid}/analyze">'
                        f'<button class="go" type="submit">근거 분석 시작</button></form>',
@@ -208,13 +337,13 @@ def render_case(s: Session, submission_id: int) -> str | None:
     # 다섯 단계로 나뉜다 — 인정검토 → 추가서류 → 면접 → 실기 → 최종.
     # 어느 단계에 서 있는지를 개요에서도 보여 준다.
     if done:
-        stg = st.stage_line or ""
+        stg = _stage_links(st, done.id)
         if st.review_done:
             steps += _step("③", "전문가 검토", _st("완료", "ok"),
                            f"판단이 필요한 {st.n_judge}개 항목을 모두 정하셨습니다."
                            + (f" 나머지 {st.n_settled}개는 이수 기록으로 확정된 것입니다."
                               if st.n_settled else "")
-                           + (f"<em> {stg}</em>" if stg else ""),
+                           + stg,
                            f'<a href="/assessments/{done.id}/review/{st.next_stage}">'
                            f'{st.next_stage}단계 열기</a>')
         else:
@@ -224,7 +353,7 @@ def render_case(s: Session, submission_id: int) -> str | None:
                            _st(f"{st.judged}/{st.n_judge}", "wn"),
                            f"보고서 {done.n_elements}개 항목 가운데 "
                            f"<b>{st.review_left}개</b>가 판단 대상입니다.{settled}"
-                           + (f"<em> {stg}</em>" if stg else ""),
+                           + stg,
                            f'<a class="go" href="/assessments/{done.id}/review/'
                            f'{st.next_stage}">검토하기</a>',
                            now=True)
@@ -271,13 +400,7 @@ def render_case(s: Session, submission_id: int) -> str | None:
 <p class="sub">총 필수 {tot}시간 · 접수 {st.received_at:%Y-%m-%d} · 제출 자료 {st.n_documents}건</p>
 
 <div class="gauge">
- <div class="line">기록으로 확인된 시간 <b>{st.credited_hours}</b>시간
-  <span class="dim">/ {tot}시간 ({st.credited_ratio:.0%})</span>
-  &nbsp;·&nbsp; 아직 확인되지 않은 시간 <b>{st.open_hours}</b>시간</div>
- {_bar(st)}
- <div class="leg"><span><i class="yes"></i>이수 기록으로 확인</span>
-  <span><i class="maybe"></i>제출 자료로 따져 볼 수 있음</span>
-  <span><i class="no"></i>훈련으로 채워야 함</span></div>
+ {_gauge(st)}
 </div>
 
 {steps}

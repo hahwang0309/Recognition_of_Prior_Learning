@@ -23,6 +23,8 @@ Track B 는 **능력단위요소** 단위로 검토하지만 훈련시간은 **�
 """
 from __future__ import annotations
 
+import json
+
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
@@ -188,7 +190,8 @@ def review_summary(s: Session, assessment_id: int) -> ReviewSummary:
 
 def save_element_review(s: Session, assessment_id: int, element_id: str,
                         decision: str, note: str | None = None,
-                        reviewer: str | None = None) -> dict[str, Any]:
+                        reviewer: str | None = None,
+                        excluded_evidence: list[str] | None = None) -> dict[str, Any]:
     rb = get_rubric()
     if decision not in rb.final_decision["element_decisions"]:
         raise ValueError(f"의견 값이 잘못됨: {decision} "
@@ -202,13 +205,15 @@ def save_element_review(s: Session, assessment_id: int, element_id: str,
 
     s.execute(text("""
         INSERT INTO element_review (assessment_id, element_id, decision,
-                                    ai_recommendation, note, reviewer)
-        VALUES (:a, :e, :d, :r, :n, :w)
+                                    ai_recommendation, note, reviewer, excluded_evidence)
+        VALUES (:a, :e, :d, :r, :n, :w, CAST(:x AS jsonb))
         ON CONFLICT (assessment_id, element_id) DO UPDATE
         SET decision=EXCLUDED.decision, note=EXCLUDED.note,
-            reviewer=EXCLUDED.reviewer, reviewed_at=now()"""),
+            reviewer=EXCLUDED.reviewer, reviewed_at=now(),
+            excluded_evidence=COALESCE(EXCLUDED.excluded_evidence, element_review.excluded_evidence)"""),
         {"a": assessment_id, "e": element_id, "d": decision, "r": rec,
-         "n": note, "w": reviewer})
+         "n": note, "w": reviewer,
+         "x": json.dumps(excluded_evidence) if excluded_evidence is not None else None})
     s.execute(text("""INSERT INTO audit_log (entity, entity_id, action, actor, detail)
                       VALUES ('element_review', :i, 'saved', :w, CAST(:d AS jsonb))"""),
               {"i": f"{assessment_id}:{element_id}", "w": reviewer or "unknown",
@@ -242,15 +247,54 @@ def record_decision(s: Session, assessment_id: int, decision: str,
     if decision not in rb.final_decision["decisions"]:
         raise ValueError(f"판정 값이 잘못됨: {decision} (가능: {rb.final_decision['decisions']})")
 
+    # 이 앱은 심사위원 개인이 아니라 **합의된 결론**을 받아 적는다.
+    # 판정자 칸을 없앴으므로 비어 오면 그렇게 적는다 — 감사 기록이 비면
+    # 나중에 누가 정한 것인지 알 수 없다.
+    decided_by = decided_by or "심사위원 합의"
+
     sm = review_summary(s, assessment_id)
     if not sm.complete and not allow_incomplete:
         raise ValueError(f"검토가 끝나지 않았습니다 ({sm.n_reviewed}/{sm.n_elements}). "
                          f"그래도 기록하려면 allow_incomplete=true")
 
-    hours = recognized_hours if recognized_hours is not None else sm.hours(conditional=conditional)
+    # 다섯 단계 검토가 낸 값이 기준이다. `review_summary` 는 1단계 판단만 세므로
+    # 면접·실기 결과와 기록 갈음이 빠진다 — 실측 R2026-9010 에서 화면은
+    # 370시간, 판정 기록은 「확정 150 · 조건부 350」이라 서로 다른 말을 했다.
+    from services.review.context import load as _load
+    ctx = _load(s, assessment_id)
+    staged = None
+    if ctx is not None:
+        got, tot = ctx.recognized_hours()
+        counts: dict[str, int] = {}
+        for v in ctx.outcome_of.values():
+            counts[v] = counts.get(v, 0) + 1
+        staged = {
+            "인정시간": got, "총시간": tot,
+            "기록갈음": sum(ctx.credited_units.values()),
+            "요소": counts,
+            "단계": {x.title: ("건너뜀" if x.skipped else f"{x.done}/{x.total}")
+                   for x in ctx.states},
+            # 시간은 갈음됐는데 요소는 미인정인 단위 — 조용히 넘기지 않는다
+            "갈음됐으나_요소미인정": ctx.credited_but_denied(),
+        }
+
+    if recognized_hours is not None:
+        hours = recognized_hours
+    elif conditional:
+        # 「조건부인정까지 다 인정된다고 치면」 — 확인 결과를 기다리지 않고
+        # 위쪽을 보고 싶을 때 쓰는 셈법이다. 다섯 단계 결과보다 앞선다.
+        hours = sm.hours(conditional=True)
+    elif staged is not None:
+        hours = staged["인정시간"]
+    else:
+        hours = sm.hours()
     basis = sm.basis()
+    basis["검토결과"] = staged
     basis["conditional_counted"] = conditional
     basis["hours_overridden"] = recognized_hours is not None
+    # 실제로 적어 넣은 시간. 계산값만 남기면 이력에서 「그때 얼마로 정했나」를
+    # 알 수 없다 — 사람이 덮어쓴 건이 바로 그렇다.
+    basis["기록한_인정시간"] = hours
     basis["suggested_decision"] = sm.suggest_decision()
     basis["pending_rubric_decisions"] = [p.key for p in rb.pending_decisions]
 
@@ -275,10 +319,18 @@ def record_decision(s: Session, assessment_id: int, decision: str,
                      {"i": sid}).scalar_one()
     store = AuditStore(s, case, sid, assessment_id)
     _snapshot_reviews(s, assessment_id)
-    store.write("decide", "최종판정", {
+    # 판정마다 따로 남긴다. 같은 이름·번호로 쓰면 앞선 판정의 근거가 덮여
+    # 사라진다 — 실측으로 두 번 판정했는데 산출물은 하나뿐이었다.
+    #
+    # 회차는 **판정 횟수**로 센다. 산출물 개수로 세면 예전에 덮어써서 빠진
+    # 것 때문에 번호가 밀려 이력과 근거가 엉뚱하게 짝지어진다.
+    n_before = s.execute(text("""
+        SELECT count(*) FROM audit_log
+        WHERE entity='final_decision' AND entity_id=:i"""), {"i": str(sid)}).scalar_one()
+    store.write("decide", f"최종판정_{n_before + 1}회", {
         "판정": decision, "감면시간": hours, "총시간": sm.total_hours,
         "사유": reason, "판정자": decided_by, "판정일": str(date.today()),
-        "산출근거": basis}, seq=1,
+        "산출근거": basis}, seq=n_before + 1,
         note=f"{decision} · {hours}/{sm.total_hours}시간"
              + (" · 시간 직접 지정" if basis["hours_overridden"] else " · 검토 결과에서 계산"))
 
@@ -289,4 +341,4 @@ def record_decision(s: Session, assessment_id: int, decision: str,
                "b": __import__("json").dumps(basis, ensure_ascii=False)})
     return {"submission_id": sid, "assessment_id": assessment_id, "decision": decision,
             "recognized_hours": hours, "total_hours": sm.total_hours,
-            "credit_basis": basis}
+            "credit_basis": basis, "reason": reason, "decided_by": decided_by}

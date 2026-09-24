@@ -184,7 +184,7 @@ class Assessment(Base):
     __tablename__ = "assessment"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     submission_id: Mapped[int] = mapped_column(ForeignKey("submission.id", ondelete="CASCADE"), index=True)
-    # 어떤 판정인가 — time(시간 대조·결정론) / evidence(근거 분석·AI).
+    # 어떤 판정인가 — time(기록 확인·결정론) / evidence(근거 분석·AI).
     # 한 접수에 둘 다 있을 수 있고, 화면은 이 값으로 갈라진다.
     kind: Mapped[str] = mapped_column(String(10), server_default="evidence", index=True)
     status: Mapped[str] = mapped_column(String(20), server_default="queued", index=True)
@@ -277,6 +277,8 @@ class ElementReview(Base):
     note: Mapped[str | None] = mapped_column(Text)
     reviewer: Mapped[str | None] = mapped_column(String(60))
     reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # 위원이 「인정 불가」로 뺀 근거의 fid 목록 — 깎아 가는 방식 (2026-09-23, 3차 TF 후 협의)
+    excluded_evidence: Mapped[list | None] = mapped_column(JSONB)
     __table_args__ = (UniqueConstraint("assessment_id", "element_id"),)
 
 

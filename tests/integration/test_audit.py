@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from krpl_core.config import get_model_profile
 import sys
 from pathlib import Path
 
@@ -228,7 +229,8 @@ def test_review_record_pairs_human_with_ai(aid):
 
 
 def test_decision_record_carries_the_arithmetic(aid):
-    d = json.loads(body(aid, "decide", "최종판정"))
+    # 판정마다 따로 남는다 — 「최종판정_1회」·「최종판정_2회」…
+    d = json.loads(body(aid, "decide", "최종판정_1회"))
     assert d["판정"] == "부분인정" and d["감면시간"] == 190 and d["총시간"] == 410
     b = d["산출근거"]
     assert sum(u["감면"] for u in b["units"]) == d["감면시간"]
@@ -238,12 +240,14 @@ def test_decision_record_carries_the_arithmetic(aid):
 def test_execution_record_names_the_real_model(aid):  # noqa: D401
     """설정된 모델이 아니라 실제로 응답한 것이 남아야 한다.
     재생으로 돌린 것을 Opus 5 가 돌린 것처럼 적으면 감사 기록이 거짓이 된다."""
+    from krpl_core.config import get_model_profile
+    model = get_model_profile().model            # 2026-09-23부터 claude-haiku-4-5
     d = json.loads(body(aid, "llm", "실행요약"))["실행"]
-    assert d["설정모델"] == "claude-opus-5"
-    assert d["실제모델"] == "replay:claude-opus-5"
+    assert d["설정모델"] == model
+    assert d["실제모델"] == f"replay:{model}"
     with session_scope() as s:
         assert s.execute(text("SELECT model FROM assessment WHERE id=:i"),
-                         {"i": aid}).scalar_one() == "replay:claude-opus-5"
+                         {"i": aid}).scalar_one() == f"replay:{model}"
 
 
 def test_retry_leaves_the_repair_message():
@@ -280,7 +284,7 @@ def test_audit_case_page_walks_all_stages(client, aid):
     for stage in ("① 문서 수집", "② AI 입력 조립", "③ AI 분석",
                   "④ 기계 검증", "⑤ 전문가 검토", "⑥ 최종 판정"):
         assert stage in h, f"{stage} 없음"
-    assert "replay:claude-opus-5" in h            # 실제 모델을 그대로 보여준다
+    assert f"replay:{get_model_profile().model}" in h            # 실제 모델을 그대로 보여준다
     assert "AI입력패키지" in h and "1차_AI응답" in h
 
 

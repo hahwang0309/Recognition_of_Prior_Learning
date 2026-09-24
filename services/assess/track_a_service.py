@@ -1,4 +1,4 @@
-"""시간 대조(Track A) — 조회 → 판정 → 저장.
+"""기록 확인(Track A) — 조회 → 판정 → 저장.
 
 ## 근거는 두 갈래다
 
@@ -12,7 +12,7 @@
 판정기(`assess_track_a`)는 시간이 어디서 왔는지 묻지 않는다. `HeldUnit` 이면 된다.
 그래서 둘을 합쳐 넣는다. 같은 능력단위에 둘 다 있으면 **큰 쪽**을 쓴다.
 
-이 덕분에 과정평가형 자격이 없는 접수 건도 시간 대조가 돈다.
+이 덕분에 과정평가형 자격이 없는 접수 건도 기록 확인이 돈다.
 접수 4건 모두 자격이 없었고, 그래서 예전에는 이 판정이 아예 돌지 않았다.
 """
 from __future__ import annotations
@@ -25,7 +25,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from krpl_core.config import get_rubric
-from krpl_rules import assess_track_a, eligible_units, rejected_units
+from krpl_rules import assess_track_a, held_units_for_time_check, rejected_units
 from krpl_rules.track_a import HeldUnit
 from services.assess.case_state import is_time_doc
 from services.assess.package import build_package
@@ -52,7 +52,7 @@ def prior_learning_view(s: Session, submission_id: int) -> tuple[list[HeldUnit],
     held = [
         HeldUnit(unit_code=c.unit_code, composed_hours=c.completed_hours,
                  composed_hours_min=None, source=f"이수:{c.doc_key or c.fid}")
-        for c in eligible_units(pkg, rb).values()
+        for c in held_units_for_time_check(pkg, rb).values()
     ]
     skipped = [{"unit_code": r.unit_code, "unit_name": r.unit_name,
                 "required_hours": r.required_hours, "completed_hours": r.completed_hours,
@@ -83,9 +83,9 @@ def _merge(*groups: list[HeldUnit]) -> list[HeldUnit]:
 
 
 def run_track_a(s: Session, submission_id: int) -> int:
-    """접수 건의 시간 대조를 돌리고 assessment 레코드를 만든다. assessment_id 반환.
+    """접수 건의 기록 확인을 돌리고 assessment 레코드를 만든다. assessment_id 반환.
 
-    같은 접수 건을 다시 돌리면 이전 시간 대조는 지운다 — 서류가 추가되면
+    같은 접수 건을 다시 돌리면 이전 기록 확인는 지운다 — 서류가 추가되면
     결과가 달라지므로, 어느 것이 최신인지 헷갈릴 행을 남기지 않는다.
     근거 분석(kind='evidence') 은 건드리지 않는다.
     """
@@ -124,6 +124,9 @@ def run_track_a(s: Session, submission_id: int) -> int:
     summary["근거"] = {"자격": len(by_qual), "기이수": len(by_prior), "채택": len(held)}
     # 「이수 기록은 냈는데 갈음되지 않은」 단위. 보고서가 이유를 말할 수 있게 남긴다.
     summary["갈음불가"] = skipped
+    # 보류 단위의 추가 증빙 안내에 쓴다 — 무엇을 이미 냈는지.
+    summary["제출문서"] = sorted({r[0] for r in s.execute(text(
+        "SELECT doc_type FROM document WHERE submission_id=:i"), {"i": submission_id})})
 
     s.execute(text("DELETE FROM assessment WHERE submission_id=:i AND kind='time'"),
               {"i": submission_id})
@@ -152,7 +155,7 @@ def run_track_a(s: Session, submission_id: int) -> int:
               "ratio": e.ratio, "evidence": e.evidence, "note": e.note},
               ensure_ascii=False)} for e in result.elements])
 
-    # 근거 분석에 쓸 자료가 없으면 이 건은 시간 대조로 끝난다 — 검토 대기로 올린다.
+    # 근거 분석에 쓸 자료가 없으면 이 건은 기록 확인으로 끝난다 — 검토 대기로 올린다.
     # 자료가 있으면 status 를 건드리지 않는다. 다음 할 일은 개요 화면이 안내한다.
     kinds = [r[0] for r in s.execute(text(
         "SELECT doc_type FROM document WHERE submission_id=:i"), {"i": submission_id})]

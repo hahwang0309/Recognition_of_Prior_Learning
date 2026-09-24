@@ -529,8 +529,6 @@ def render_review(s: Session, assessment_id: int) -> str:
         f'<div><b>{e(k)}</b> {e(v)}</div>'
         for k, v in (rb.final_decision.get("element_decision_meanings") or {}).items())
 
-    dec_opts = "".join(f'<option{" selected" if fd and fd["decision"] == d else ""}>{d}</option>'
-                       for d in rb.final_decision["decisions"])
     fd_line = (f'기록됨 — {e(fd["decision"])} · {fd["recognized_hours"]}시간 '
                f'· {e(fd["decided_by"])}' if fd else "아직 기록 전")
 
@@ -593,11 +591,11 @@ def render_review(s: Session, assessment_id: int) -> str:
  <div class="st">검토 <b id="b-prog">{sm.n_reviewed}</b>/{sm.n_elements} ·
   감면 <b id="b-h">{sm.hours()}</b>/{sm.total_hours}시간
   <span id="b-sug">(권고안 {sm.suggest_decision()})</span></div>
- <select id="dec">{dec_opts}</select>
  <input class="rs" id="who" placeholder="검토자" value="{e(fd['decided_by'] if fd else '')}">
- <input class="rs" id="why" placeholder="판정 사유" style="flex:1;min-width:180px"
-        value="{e(fd['reason'] if fd else '')}">
- <button class="go" id="save">최종 판정 기록</button>
+ <!-- 판정은 5단계에서 한다. 여기에도 두었더니 이 화면은 1단계 판단만 세는
+      또 다른 계산을 써서 같은 건에 350시간이라고 적었다(5단계는 370시간). -->
+ <a class="go" id="tofinal" href="/assessments/{assessment_id}/review/5#decide"
+    style="text-decoration:none">최종 판정하러 가기 →</a>
  <div id="gate" class="gate"></div>
 </div></div>
 
@@ -676,12 +674,10 @@ async function refresh(){{
  $('b-h').textContent = d.hours;
  $('b-sug').textContent = d.complete ? `(권고안 ${{d.suggested}})`
    : `(남은 요소 ${{d.n_elements - d.n_reviewed}}개)`;
- $('dec').value = d.suggested;
- // 버튼을 잠그지 않는다. 잠긴 버튼은 왜 잠겼는지도, 무엇을 하면 되는지도
- // 말해 주지 못한다 — 실제로 「다 찍었는데 안 눌린다」가 됐다.
+ // 판정은 5단계에서 한다. 여기서는 아직 남은 것이 있으면 그것만 알린다.
  LEFT = d.n_left;
- $('save').textContent = d.complete ? '최종 판정 기록'
-   : `최종 판정 기록 (남은 ${{d.n_left}}개 확인)`;
+ $('tofinal').textContent = d.complete ? '최종 판정하러 가기 →'
+   : `최종 판정하러 가기 → (남은 ${{d.n_left}}개)`;
 }}
 
 async function mark(btn, eid){{
@@ -719,48 +715,6 @@ function jumpTo(el, why) {{
  $('gate').style.display = 'block';
  setTimeout(() => {{ $('gate').style.display = 'none'; }}, 6000);
 }}
-
-$('save').onclick = async () => {{
- const b = $('save');
-
- // ① 아직 정하지 않은 요소가 있으면 첫 번째로 데려간다
- if (LEFT > 0) {{
-  const el = document.querySelector('.el:not(.done)');
-  if (el) {{
-   const grp = el.closest('details.grp');
-   if (grp) grp.open = true;
-   jumpTo(el, `아직 정하지 않은 요소가 ${{LEFT}}개 있습니다. 여기부터 정해 주십시오.`);
-   return;
-  }}
- }}
- // ② 검토자를 안 적었으면 그 칸으로
- if (!$('who').value.trim()) {{
-  jumpTo($('who'), '누가 검토했는지 적어 주십시오. 감사 기록에 남습니다.');
-  return;
- }}
- // ③ 사유를 안 적었으면 그 칸으로
- if (!$('why').value.trim()) {{
-  jumpTo($('why'), '판정 사유를 적어 주십시오. 나중에 왜 그렇게 정했는지 알 수 없습니다.');
-  return;
- }}
-
- b.disabled = true;
- try {{
-  const r = await fetch(`/submissions/${{SID}}/decision`, {{
-   method: 'POST', headers: {{'Content-Type': 'application/json'}},
-   body: JSON.stringify({{assessment_id: AID, decision: $('dec').value,
-                        reason: $('why').value || null,
-                        decided_by: $('who').value || null}})}});
-  const d = await r.json();
-  if(r.ok) $('fd').textContent =
-    `기록됨 — ${{d.decision}} · ${{d.recognized_hours}}시간 · ${{$('who').value || '검토자 미기재'}}`;
-  alert(r.ok ? `기록했습니다 — ${{d.decision}} · 감면 ${{d.recognized_hours}}시간`
-             : `기록하지 못했습니다: ${{d.detail}}`);
- }} finally {{
-  b.disabled = false;
-  refresh();
- }}
-}};
 
 refresh();
 </script></body></html>"""

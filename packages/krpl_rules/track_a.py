@@ -1,6 +1,6 @@
 """Track A 판정 엔진.
 
-과정평가형 자격 등 NCS 기반 이수자를 능력단위·시간 대조로 판정한다.
+과정평가형 자격 등 NCS 기반 이수자를 능력단위·기록 확인으로 판정한다.
 LLM을 쓰지 않는다. DB에도 의존하지 않는 순수 함수 — 입력을 주면 판정만 한다.
 
 판정 임계값과 권고 매핑은 코드가 아니라 config/rubric/*.yaml 에 있다.
@@ -41,8 +41,8 @@ class ElementVerdict:
     min_hours: int
     completed_hours: int | None
     ratio: float | None
-    verdict: str                        # 완전충족|조정범위내|시간부족|미이수
-    recommendation: str                 # R0|R2|R5
+    verdict: str                        # 완전충족|조정범위내|보류|시간부족|미이수 (rubric.track_a.verdicts)
+    recommendation: str                 # R0|R4|R5
     verification: str
     confidence: str                     # 확정|추정(이수증명 필요)
     evidence: list[dict[str, Any]] = field(default_factory=list)
@@ -56,6 +56,10 @@ class TrackAResult:
     n_units: int
     elements: list[ElementVerdict]
     rubric_version: str
+    verdict_order: list[str] = field(default_factory=lambda: ["완전충족", "조정범위내", "보류", "시간부족", "미이수"])
+    # 인정 / 보류 / 불인정 — rubric.track_a.buckets
+    buckets: dict[str, list[str]] = field(default_factory=lambda: {
+        "인정": ["완전충족", "조정범위내"], "보류": ["보류"], "불인정": ["시간부족", "미이수"]})
 
     # ── 집계 ──
     @property
@@ -67,10 +71,17 @@ class TrackAResult:
 
     @property
     def hours(self) -> dict[str, int]:
-        out = {"완전충족": 0, "조정범위내": 0, "시간부족": 0, "미이수": 0}
+        """판정별 요구시간 합. 인정된 단위는 이수시간이 아니라 **요구시간 전체**가 감면된다."""
+        out = {k: 0 for k in self.verdict_order}
         for e in self.elements:
-            out[e.verdict] += e.required_hours
+            out[e.verdict] = out.get(e.verdict, 0) + e.required_hours
         return out
+
+    @property
+    def bucket_hours(self) -> dict[str, int]:
+        """인정 / 보류 / 불인정 시간 — 2차 TF 가 요구한 세 묶음."""
+        h = self.hours
+        return {b: sum(h.get(v, 0) for v in vs) for b, vs in self.buckets.items()}
 
     @property
     def unit_coverage_rate(self) -> float:
@@ -79,19 +90,22 @@ class TrackAResult:
 
     @property
     def credit_rate_strict(self) -> float:
-        """확정 인정률 — 시간까지 충족한 능력단위의 요구시간 비율."""
-        return self.hours["완전충족"] / self.total_hours if self.total_hours else 0.0
+        """참고값 — 이수시간이 요구시간을 100% 채운 단위만. 현행 규칙(50% 이상 전체 인정)보다 엄격하다."""
+        return self.hours.get("완전충족", 0) / self.total_hours if self.total_hours else 0.0
 
     @property
     def credit_rate_adjusted(self) -> float:
-        """조정 적용 시 인정률 — −50% 조항까지 적용."""
-        h = self.hours
-        return (h["완전충족"] + h["조정범위내"]) / self.total_hours if self.total_hours else 0.0
+        """인정률 — 현행 선이수인정 규칙(코드 일치 + 요구시간의 50% 이상 → 요구시간 전체 인정)."""
+        return self.bucket_hours["인정"] / self.total_hours if self.total_hours else 0.0
+
+    @property
+    def hold_rate(self) -> float:
+        return self.bucket_hours["보류"] / self.total_hours if self.total_hours else 0.0
 
     @property
     def remaining_hours(self) -> int:
-        h = self.hours
-        return h["시간부족"] + h["미이수"]
+        """불인정 시간 — 훈련으로 이수해야 하는 시간. 보류는 포함하지 않는다."""
+        return self.bucket_hours["불인정"]
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -101,9 +115,11 @@ class TrackAResult:
             "unit_coverage_rate": round(self.unit_coverage_rate, 4),
             "credit_rate_strict": round(self.credit_rate_strict, 4),
             "credit_rate_adjusted": round(self.credit_rate_adjusted, 4),
+            "hold_rate": round(self.hold_rate, 4),
             "remaining_hours": self.remaining_hours,
             "by_verdict": self.by_verdict,
             "hours": self.hours,
+            "bucket_hours": self.bucket_hours,
             "rubric_version": self.rubric_version,
         }
 
@@ -171,7 +187,11 @@ def assess_track_a(
             evidence=evidence, note=spec.get("note"),
         ))
 
+    ta = rubric.track_a
     return TrackAResult(
         program_id=program_id, total_hours=total_hours, n_units=len(required),
+        verdict_order=[v["id"] for v in ta["verdicts"]],
+        buckets={k: list(v) for k, v in (ta.get("buckets") or {}).items()} or
+                {"인정": ["완전충족", "조정범위내"], "보류": ["보류"], "불인정": ["시간부족", "미이수"]},
         elements=elements, rubric_version=rubric.version,
     )

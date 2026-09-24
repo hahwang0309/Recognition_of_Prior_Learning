@@ -307,6 +307,41 @@ def _normalize_conflicts(el: dict) -> None:
     el["conflicts"] = out
 
 
+def _prior_elements(s: Session, assessment_id: int) -> dict[str, dict]:
+    """이전 판정의 요소별 산출물. 다시 부르지 않고 그대로 싣기 위한 것이다."""
+    return {r[0]: r[1] for r in s.execute(text(
+        "SELECT element_id, payload FROM assessment_element WHERE assessment_id=:a"),
+        {"a": assessment_id}) if isinstance(r[1], dict)}
+
+
+def _carry_review(s: Session, old_aid: int, new_aid: int,
+                  redo: set[str]) -> tuple[int, int]:
+    """검토 기록을 새 판정으로 옮긴다. (요소 판단 수, 보완 항목 결과 수)
+
+    다시 볼 요소(`redo`)의 판단은 **옮기지 않는다.** 새 자료를 보고 다시
+    정해야 하기 때문이다. 옮기지 않으면 그 요소만 1단계에 다시 나타난다.
+
+    보완 항목 결과는 전부 옮긴다 — 열쇠가 항목 글의 해시라, 같은 항목이면
+    같은 열쇠다. 새 판정에 없어진 항목의 결과는 그냥 쓰이지 않는다.
+    """
+    n1 = s.execute(text("""
+        INSERT INTO element_review (assessment_id, element_id, decision,
+                                    ai_recommendation, note, reviewer, reviewed_at)
+        SELECT :new, element_id, decision, ai_recommendation, note, reviewer, reviewed_at
+        FROM element_review WHERE assessment_id=:old
+          AND NOT (element_id = ANY(:redo))
+        ON CONFLICT (assessment_id, element_id) DO NOTHING"""),
+        {"new": new_aid, "old": old_aid, "redo": sorted(redo)}).rowcount
+    n2 = s.execute(text("""
+        INSERT INTO remediation_result (assessment_id, item_key, method, item,
+                                        result, note, decided_by, decided_at)
+        SELECT :new, item_key, method, item, result, note, decided_by, decided_at
+        FROM remediation_result WHERE assessment_id=:old
+        ON CONFLICT (assessment_id, item_key) DO NOTHING"""),
+        {"new": new_aid, "old": old_aid}).rowcount
+    return n1, n2
+
+
 def _store(s: Session, aid: int, out: dict, rep: ValidationReport) -> None:
     s.execute(text("DELETE FROM assessment_element WHERE assessment_id=:a"), {"a": aid})
     rows = []
@@ -329,8 +364,24 @@ def _store(s: Session, aid: int, out: dict, rep: ValidationReport) -> None:
 
 
 def run_track_b(s: Session, submission_id: int, *,
-                client: LLMClient | None = None, profile_name: str | None = None) -> int:
-    """접수 건을 분석하고 assessment 를 만든다. assessment_id 반환."""
+                client: LLMClient | None = None, profile_name: str | None = None,
+                keep_from: int | None = None,
+                focus: list[str] | None = None) -> int:
+    """접수 건을 분석하고 assessment 를 만든다. assessment_id 반환.
+
+    ## 다시 돌릴 때 — `keep_from` 과 `focus`
+
+    2단계에서 추가 서류를 받으면 그 자료를 반영해 다시 봐야 한다. 그렇다고
+    서른세 개 요소를 통째로 다시 돌리면 비용도 크고, 이미 사람이 판단한
+    것까지 흔들린다.
+
+      `keep_from`  이전 판정(assessment_id). 그 결과를 그대로 싣는다.
+      `focus`      다시 볼 요소. 새 서류가 풀려던 것들만이다.
+
+    나머지 요소는 AI 를 부르지 않고 이전 판정을 옮겨 싣는다. 검토 기록
+    (요소 판단·보완 항목 결과)도 함께 옮긴다 — 다시 볼 요소의 판단만 뺀다.
+    새 자료를 보고 다시 정해야 하기 때문이다.
+    """
     cfg = get_settings()
     rb = get_rubric()
     profile = get_model_profile(profile_name)
@@ -388,6 +439,21 @@ def run_track_b(s: Session, submission_id: int, *,
     if r0_elements:
         log.info("판정 %s — 기이수 %d요소를 코드로 확정 (AI 판정 대상에서 제외)",
                  case, len(r0_elements))
+
+    # ── ①-2 다시 볼 요소만 남긴다 ────────────────────────────────
+    carried: dict[str, dict] = {}
+    if keep_from:
+        want = set(focus or [])
+        carried = {eid: pl for eid, pl in _prior_elements(s, keep_from).items()
+                   if eid not in want and eid not in settled}
+        settled |= set(carried)
+        store.write("package", "재분석_범위",
+                    {"이전판정": keep_from, "다시볼요소": sorted(want),
+                     "이월요소": sorted(carried)}, seq=4,
+                    note=f"이전 판정 {keep_from} 에서 {len(carried)}요소 이월 · "
+                         f"{len(want)}요소 재판정")
+        log.info("판정 %s — 재분석: %d요소 이월, %d요소 다시 봄",
+                 case, len(carried), len(want))
 
     # ── ② 남은 요소만 AI 에 보낸다 ────────────────────────────────
     ai_pkg = _without(pkg, settled)
@@ -448,7 +514,7 @@ def run_track_b(s: Session, submission_id: int, *,
     # ── 여기서부터 DB. 청크 순서대로 기록한다 ──
     usage = Usage()
     usage.merge(neg_usage)
-    elements: list[dict] = list(r0_elements)
+    elements: list[dict] = list(r0_elements) + list(carried.values())
     issues: list[dict] = []
     models: set[str] = set()
     for n, r in enumerate(results, 1):
@@ -518,6 +584,12 @@ def run_track_b(s: Session, submission_id: int, *,
         status = "failed"
     _store(s, aid, merged, rep)
 
+    # 다시 돌린 것이면 검토 기록을 옮긴다. 옮기지 않으면 서류 한 장 때문에
+    # 서른세 개를 처음부터 다시 판단하게 된다.
+    if keep_from and ok:
+        n1, n2 = _carry_review(s, keep_from, aid, set(focus or []))
+        log.info("판정 %s — 검토 이월: 요소 판단 %d건, 보완 항목 결과 %d건", case, n1, n2)
+
     # 설정된 모델이 아니라 **실제로 응답한 것**을 기록한다.
     # 재생(replay)으로 돌린 것을 Opus 5 가 돌린 것처럼 남기면 감사 기록이 거짓이 된다.
     actual = ", ".join(sorted(models)) or profile.model
@@ -531,6 +603,8 @@ def run_track_b(s: Session, submission_id: int, *,
                "effort": profile.effort, "지침": pv, "기준": rb.version,
                "분할": ac.chunk_by, "청크": len(chunks), "동시": ac.chunk_concurrency,
                "기이수_코드확정": len(r0_elements),
+               "재분석": ({"이전판정": keep_from, "이월요소": len(carried),
+                        "다시본요소": sorted(focus or [])} if keep_from else None),
                "부정진술로_AI판정": sorted(negated),
                "호출": total_attempts, "검증": "통과" if ok else "미통과",
                "미완료청크": failed, "토큰": usage.as_dict() | {"출력상한": profile.max_tokens}},

@@ -19,7 +19,7 @@ from sqlalchemy import text
 
 from krpl_core.config import get_settings
 from krpl_core.db import session_scope
-from krpl_core.queue import enqueue
+from krpl_core.queue import enqueue, worker_alive
 from krpl_core.worker import Worker
 
 KIND = "시험_실패"
@@ -106,7 +106,7 @@ def test_a_permanent_failure_is_not_retried(job):
 
 
 def test_track_a_on_a_missing_submission_is_permanent():
-    """없어진 접수 건에 걸린 시간 대조 작업 — 이것이 실제로 쌓여 있었다."""
+    """없어진 접수 건에 걸린 기록 확인 작업 — 이것이 실제로 쌓여 있었다."""
     from services.assess.worker import HANDLERS
     with session_scope() as s:
         s.execute(text("""DELETE FROM job WHERE kind='track_a'
@@ -150,3 +150,41 @@ def test_a_successful_job_is_marked_done(job):
     _run_now(w, job)
     status, attempts = _state(job)
     assert status == "done" and attempts == 1
+
+
+# ── ③ 집었다는 표시가 밖에서 보이는가 ────────────────────────────
+
+def test_a_running_job_is_visible_from_outside(job):
+    """예전에는 집는 것과 처리하는 것이 한 트랜잭션이었다. 그래서 판정이
+    도는 6~30분 내내 밖에서는 그 작업이 `queued` 로 보였고, 화면은
+    「판정 워커가 돌고 있지 않습니다」라고 말했다 — 바로 그 작업을 돌리는
+    중이었는데도."""
+    seen = {}
+
+    def h(s, p):
+        # 핸들러 **밖의** 세션에서 본다 — 화면이 보는 것과 같은 자리다
+        with session_scope() as s2:
+            r = s2.execute(text("SELECT status, attempts, locked_at FROM job WHERE id=:i"),
+                           {"i": job}).one()
+            seen["status"], seen["attempts"], seen["locked"] = r[0], r[1], r[2]
+            seen["alive"] = worker_alive(s2)
+
+    _run_now(Worker({KIND: h}), job)
+    assert seen["status"] == "running", f"도는 중인데 밖에서는 {seen['status']} 로 보인다"
+    assert seen["locked"] is not None, "집은 시각이 안 남았다"
+    assert seen["attempts"] == 1
+    assert seen["alive"] is True, "워커가 돌고 있는데 죽었다고 말한다"
+    assert _state(job) == ("done", 1)
+
+
+def test_a_long_running_job_keeps_the_worker_alive(job):
+    """판정 하나가 30분 걸리는 동안 새로 집는 일이 없다. 「최근에 집었나」만
+    보면 5분 뒤부터 워커가 죽은 것으로 보인다."""
+    with session_scope() as s:
+        s.execute(text("""UPDATE job SET status='running',
+            locked_at = now() - interval '12 minutes' WHERE id=:i"""), {"i": job})
+        assert worker_alive(s) is True, "12분째 돌고 있는데 죽었다고 한다"
+        # 회수 한계를 넘으면 죽은 것으로 본다 — reclaim_stale 이 도로 돌린다
+        s.execute(text("""UPDATE job SET locked_at = now() - interval '45 minutes'
+            WHERE id=:i"""), {"i": job})
+        assert worker_alive(s) is False, "45분째 잡혀 있으면 죽은 것으로 봐야 한다"

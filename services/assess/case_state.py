@@ -35,7 +35,7 @@ def _norm(s: str) -> str:
 
 @lru_cache(maxsize=1)
 def _time_doc_types() -> frozenset[str]:
-    """시간 대조가 이미 값을 뽑아 쓴 자료. 근거 분석에서 「추가 자료」로 세지 않는다.
+    """기록 확인이 이미 값을 뽑아 쓴 자료. 근거 분석에서 「추가 자료」로 세지 않는다.
 
     어느 문서가 그런지는 정책이므로 기준서(`document_types.*.time_source`)가 정한다.
     코드에 적어 두었더니 화면 어휘와 어긋났다.
@@ -91,6 +91,21 @@ class Run:
         return self.status in ("manual_review", "failed")
 
     @property
+    def steps(self) -> tuple[int, int, str, list[str]]:
+        """(끝난 청크, 전체 청크, 지금 하는 일, 남은 능력단위 이름).
+
+        진행률은 판정이 한글 열쇠(전체·완료·단계·남은)로 적는다. 화면이
+        영어 열쇠(total·done·phase)로 읽고 있었다 — 능력단위 7개를 도는
+        내내 「0/1 능력단위」라고 말했다. 읽는 자리를 여기 하나로 둔다.
+        """
+        p = self.progress or {}
+        done = int(p.get("완료") or 0)
+        total = int(p.get("전체") or 0)
+        phase = str(p.get("단계") or "분석 중")
+        left = [str(x) for x in (p.get("남은") or [])]
+        return done, total, phase, left
+
+    @property
     def trouble(self) -> str:
         """무엇이 잘못됐는지 한 줄로."""
         v = (self.note.get("validation") or {}) if isinstance(self.note, dict) else {}
@@ -119,7 +134,7 @@ class CaseState:
     extra_docs: list[dict]                  # 근거 분석에 쓸 수 있는 자료
     queued_at: datetime | None              # 큐에 든 근거 분석 작업 (아직 안 잡힘)
     worker_ok: bool                         # 워커가 최근에 작업을 집었나
-    time: Run | None                        # ① 시간 대조
+    time: Run | None                        # ① 기록 확인
     evidence: Run | None                    # ② 근거 분석 — **가장 최근** 실행
     # 이미 끝난 근거 분석. 새 실행이 도는 중이라도 지난 보고서는 계속 열려야 한다.
     # 이것을 나누지 않았을 때, 재실행 한 번에 완성된 보고서가 화면에서 사라졌다.
@@ -128,11 +143,23 @@ class CaseState:
     n_judge: int                            # 사람이 따져야 하는 요소 수
     next_stage: int                         # 다음에 손댈 검토 단계 (1~5)
     stage_line: str                         # 다섯 단계 진척을 한 줄로
+    # 다섯 단계 각각 — {n, title, total, done, skipped, complete}.
+    # 개요에서 면접 질문지·실기 과제 목록으로 바로 들어갈 수 있어야 한다.
+    stages: list[dict]
     n_settled: int                          # 기록으로 확정돼 확인만 하면 되는 수
     judged: int                             # 그중 판단이 기록된 수
     decision: dict | None                   # ④ 최종 판정
+    # 이 접수 건에 든 근거 분석 비용·호출을 모두 합친 것. 마지막 판정의 것만
+    # 보이면 재판정한 건은 실제보다 싸 보인다 (실측 R2026-9010: $0.60 로
+    # 보였지만 처음 판정까지 합치면 $3.25 다).
+    runs_cost: float = 0.0
+    runs_attempts: int = 0
+    n_runs: int = 0
+    # 검토가 시작된 뒤의 시간 배분. 검토 전에는 None 이고, 그때는 기록 확인
+    # 결과(credited_hours/open_hours)만으로 말한다.
+    split: Any = None                       # services.review.HourSplit | None
 
-    # ── ① 시간 대조에서 나온 숫자 ──
+    # ── ① 기록 확인에서 나온 숫자 ──
     @property
     def credited_hours(self) -> int:
         h = (self.time.note.get("hours") if self.time else None) or {}
@@ -147,6 +174,34 @@ class CaseState:
     @property
     def credited_ratio(self) -> float:
         return self.credited_hours / self.total_hours if self.total_hours else 0.0
+
+    # ── 검토까지 반영한 시간 ──
+    # 개요의 막대는 이쪽을 쓴다. 기록 확인만 읽었더니, 전문가가 100시간을 더
+    # 인정한 뒤에도 「아직 확인되지 않은 시간」이 그대로였다.
+    @property
+    def expert_hours(self) -> int:
+        """사람이 판단해 기록 위에 더 인정한 시간."""
+        return self.split.expert if self.split else 0
+
+    @property
+    def recognized_hours(self) -> int:
+        """지금까지 인정된 시간 — 기록 + 전문가 판단."""
+        return self.split.credited if self.split else self.credited_hours
+
+    @property
+    def pending_hours(self) -> int:
+        """면접·실기·추가서류 결과를 기다리는 시간."""
+        return self.split.pending if self.split else 0
+
+    @property
+    def training_hours(self) -> int:
+        """확인으로는 풀리지 않아 훈련으로 채워야 하는 시간."""
+        return self.split.training if self.split else 0
+
+    @property
+    def unresolved_hours(self) -> int:
+        """아직 인정되지 않은 시간. 검토 전에는 기록 확인이 남긴 것과 같다."""
+        return self.split.open if self.split else self.open_hours
 
     @property
     def skipped(self) -> list[dict]:
@@ -178,10 +233,25 @@ class CaseState:
         """큐에 있는데 아직 아무도 집지 않았다."""
         return bool(self.queued_at) and not (self.evidence and self.evidence.running)
 
+    # 갓 넣은 작업이 집히기까지 걸리는 시간. 워커는 이 간격으로 큐를 본다.
+    # 그 안에는 「아무도 집어 가지 않습니다」라고 말하지 않는다 — 정상이다.
+    GRACE_SEC = 30
+
     @property
     def stalled(self) -> bool:
-        """기다리는데 워커가 없다. 이대로 두면 영영 안 된다."""
-        return self.waiting_in_queue and not self.worker_ok
+        """기다리는데 워커가 없다. 이대로 두면 영영 안 된다.
+
+        `worker_alive` 는 「최근에 작업을 집었나」를 본다. 놀던 워커는 살아
+        있어도 그 흔적이 없으므로, 넣자마자 물으면 죽은 것으로 보인다.
+        그래서 **기다린 시간**을 함께 본다.
+        """
+        if not (self.waiting_in_queue and not self.worker_ok):
+            return False
+        if self.queued_at is None:
+            return False
+        from datetime import datetime, timezone
+        now = datetime.now(self.queued_at.tzinfo or timezone.utc)
+        return (now - self.queued_at).total_seconds() > self.GRACE_SEC
 
     # ── ③ 검토 ──
     # 진척은 **판단 대상**으로 센다. 훈련이수증으로 확정된 항목까지 한 줄씩
@@ -273,7 +343,8 @@ def case_state(s: Session, submission_id: int) -> CaseState | None:
     done_runs = _runs(s, submission_id, only_done=True)
     ev, ev_done = runs.get("evidence"), done_runs.get("evidence")
     n_reviewed = n_judge = n_settled = judged = 0
-    next_stage, stage_line = 1, ""
+    next_stage, stage_line, split = 1, "", None
+    stages: list[dict] = []
     if ev_done is not None:
         n_reviewed = s.execute(text(
             "SELECT count(DISTINCT element_id) FROM element_review WHERE assessment_id=:a"),
@@ -297,7 +368,12 @@ def case_state(s: Session, submission_id: int) -> CaseState | None:
             from services.review import load as _review_ctx
             rc = _review_ctx(s, ev_done.id)
             if rc is not None:
+                split = rc.hour_split()
                 next_stage = rc.next_stage
+                stages = [{"n": x.n, "title": x.title, "total": x.total,
+                           "done": x.done, "skipped": x.skipped,
+                           "moot": x.moot, "complete": x.complete}
+                          for x in rc.states]
                 stage_line = " · ".join(
                     f"{x.n}{x.title} " + ("건너뜀" if x.skipped else
                                           "완료" if x.complete else f"{x.done}/{x.total}")
@@ -311,6 +387,11 @@ def case_state(s: Session, submission_id: int) -> CaseState | None:
         SELECT min(created_at) FROM job
         WHERE kind='track_b' AND status='queued'
           AND (payload->>'submission_id')::int = :i"""), {"i": submission_id}).scalar()
+
+    tot = s.execute(text("""
+        SELECT coalesce(sum(cost_usd),0), coalesce(sum(attempts),0), count(*)
+        FROM assessment WHERE submission_id=:i AND kind='evidence'"""),
+        {"i": submission_id}).one()
 
     dec = s.execute(text("""
         SELECT decision, reason, decided_by, recognized_hours, total_hours, decided_at
@@ -329,8 +410,10 @@ def case_state(s: Session, submission_id: int) -> CaseState | None:
         time=done_runs.get("time") or runs.get("time"),
         evidence=ev, evidence_done=ev_done, n_reviewed=n_reviewed,
         n_judge=n_judge, n_settled=n_settled, judged=judged,
-        next_stage=next_stage, stage_line=stage_line,
+        next_stage=next_stage, stage_line=stage_line, stages=stages, split=split,
         decision=dict(dec) if dec else None,
+        runs_cost=float(tot[0] or 0), runs_attempts=int(tot[1] or 0),
+        n_runs=int(tot[2] or 0),
     )
 
 

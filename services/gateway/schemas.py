@@ -95,7 +95,7 @@ class ElementOut(BaseModel):
 
 
 class AssessmentOut(BaseModel):
-    """Track A — 능력단위 단위. 시간 대조만으로 판정한다."""
+    """Track A — 능력단위 단위. 기록 확인만으로 판정한다."""
     track: Literal["A"] = "A"
     assessment_id: int
     case_number: str
@@ -162,6 +162,7 @@ class ElementReviewIn(BaseModel):
     decision: Literal["인정", "조건부인정", "불인정", "보류"]
     note: str | None = None
     reviewer: str | None = None
+    excluded_evidence: list[str] | None = None    # 위원이 「인정 불가」로 뺀 근거 fid (2026-09-23)
 
 
 class ElementReviewOut(BaseModel):
@@ -177,6 +178,7 @@ class BulkReviewIn(BaseModel):
     decision: Literal["인정", "조건부인정", "불인정", "보류"]
     note: str | None = None
     reviewer: str | None = None
+    excluded_evidence: list[str] | None = None
 
 
 class ReviewSummaryOut(BaseModel):
@@ -221,6 +223,9 @@ class DecisionOut(BaseModel):
     recognized_hours: int
     total_hours: int
     credit_basis: dict[str, Any]
+    # 되읽을 수 없으면 화면이 다시 기록할 때 사유가 날아간다 — 실제로 그랬다.
+    reason: str | None = None
+    decided_by: str | None = None
 
 
 class ProgramOut(BaseModel):

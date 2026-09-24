@@ -72,6 +72,35 @@ def eligible_units(package: dict, rubric) -> dict[str, PriorCredit]:
     return out
 
 
+def held_units_for_time_check(package: dict, rubric) -> dict[str, PriorCredit]:
+    """기록 확인(Track A)에 넣을 이수 단위 — 시간 하한을 **걸지 않는다**.
+
+    하한(50%) 미만인 단위를 여기서 걸러 버리면 판정기가 그 단위를 「미이수」로 본다.
+    2차 TF 는 30~50% 를 「보류」로 두고 부족 이유와 추가 증빙을 안내하기로 했으므로,
+    하한 판정은 rubric.track_a.verdicts 가 하도록 전부 넘긴다.
+    R0(기이수 인정) 확정에는 여전히 eligible_units() 를 쓴다.
+    """
+    spec = rubric.recommendations["R0"]
+    need_eval = spec["requires"].get("evaluation_passed", True)
+    hours = {u["unit_code"]: u for u in package["ncs"]["units"]}
+    out: dict[str, PriorCredit] = {}
+    for pl in package.get("prior_learning") or []:
+        u = hours.get(pl["unit_code"])
+        if u is None or (need_eval and not pl.get("evaluated")):
+            continue
+        req = u["required_hours"] or 0
+        done = pl.get("completed_hours") or 0
+        if not done:
+            continue
+        out[pl["unit_code"]] = PriorCredit(
+            unit_code=pl["unit_code"], unit_name=u["unit_name"], required_hours=req,
+            completed_hours=done, ratio=(done / req if req else 0.0),
+            evaluation=pl.get("evaluation") or "",
+            fid=pl["fid"], doc_key=pl.get("doc_id") or "", doc_type=pl.get("doc_type") or "",
+            grade=pl.get("grade") or "B", source_text=pl.get("source_text") or "")
+    return out
+
+
 @dataclass(frozen=True)
 class RejectedCredit:
     """이수 기록으로 잡히긴 했으나 시간 갈음에 쓸 수 없는 능력단위."""
@@ -92,7 +121,6 @@ def rejected_units(package: dict, rubric) -> list[RejectedCredit]:
     """
     spec = rubric.recommendations["R0"]
     need_eval = spec["requires"].get("evaluation_passed", True)
-    floor = spec["downgrade_if"]["completed_hours_ratio_below"]
 
     hours = {u["unit_code"]: u for u in package["ncs"]["units"]}
     out: list[RejectedCredit] = []
@@ -105,10 +133,10 @@ def rejected_units(package: dict, rubric) -> list[RejectedCredit]:
         if need_eval and not pl.get("evaluated"):
             reason = ("이수시간과 평가결과가 적혀 있지 않습니다"
                       if done is None else "내부평가 합격이 확인되지 않습니다")
-        elif req and (done or 0) / req < floor:
-            reason = f"이수 {done}시간으로 요구 {req}시간의 {floor:.0%}에 못 미칩니다"
         else:
-            continue                       # 통과한 것 — eligible_units 가 가져간다
+            # 시간 하한(50%) 미달은 더 이상 여기서 걸러내지 않는다 — 판정기가
+            # 「보류」(30~50%) 또는 「시간부족」(30% 미만)으로 표시한다 (2차 TF).
+            continue
         out.append(RejectedCredit(
             unit_code=pl["unit_code"], unit_name=u["unit_name"], required_hours=req,
             completed_hours=done, reason=reason, doc_type=pl.get("doc_type") or ""))
@@ -162,6 +190,7 @@ def make_element(package: dict, element: dict, credit: PriorCredit,
             "ksa_ref": ref,
             "fids": [credit.fid],
             "grade": ev_grade,
+            "fit": "직접",          # NCS 기반 훈련 이수증은 국가 기준 평가를 마친 자료 — 직접 근거 (2026-09-24)
             "quote": quote,
             "why": (f"{credit.unit_name} 능력단위를 {credit.hours_note}하고 "
                     f"내부평가 {credit.evaluation} 기록이 이수증에 있다."),

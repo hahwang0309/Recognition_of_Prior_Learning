@@ -77,7 +77,9 @@ def test_full_flow(client):
     assert len(a["elements"]) == 9
     assert a["summary"]["credit_rate_strict"] == pytest.approx(0.7701, abs=1e-3)
     e = next(x for x in a["elements"] if x["unit_name"] == "개발자 환경 구축")
-    assert (e["verdict"], e["recommendation"]) == ("시간부족", "R2")
+    # 50% 미만은 30% 를 경계로 보류(R4·추가서류) / 시간부족(R5·훈련) 으로 갈린다 (2차 TF 보류 구간)
+    assert e["ratio"] < 0.5
+    assert (e["verdict"], e["recommendation"]) == (("보류", "R4") if e["ratio"] >= 0.30 else ("시간부족", "R5"))
     assert e["evidence"][0]["source"] == "정보처리산업기사"          # 근거 추적
 
 

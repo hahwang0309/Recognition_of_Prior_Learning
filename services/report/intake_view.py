@@ -74,7 +74,7 @@ def render_new(programs: list[dict], doc_types: list[dict],
   <div><label for="track">구분</label>
    <select id="track">
     <option value="B" selected>Track B — 경력·훈련 등 제출 서류 기반</option>
-    <option value="A">Track A — 과정평가형 자격 보유 (시간 대조만)</option>
+    <option value="A">Track A — 과정평가형 자격 보유 (기록 확인만)</option>
    </select></div>
  </div>
 

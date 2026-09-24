@@ -17,7 +17,7 @@ storage:
   max_upload_mb: 50
   # **파서가 실제로 읽는 것만** 받는다. 기동 시 대조하며, 어긋나면 뜨지 않는다.
   # 못 읽는 형식을 받아 두면 담당자가 올린 뒤에야 「조각 0개」를 보게 된다.
-  allowed_extensions: [pdf, hwp, hwpx, txt, md]
+  allowed_extensions: [pdf, hwp, hwpx, txt, md, docx]   # docx: 검토용 문서 그대로 접수 (2026-09-23)
   # 아직 못 읽는 것 — 받지 않는다
   #   jpg·jpeg·png  스캔 이미지. ingest.ocr_enabled 를 켜고 OCR 을 붙여야 한다
   #   docx·xlsx     파서 미구현

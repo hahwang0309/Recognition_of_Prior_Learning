@@ -73,6 +73,10 @@ class Item:
     targets: list[dict] = field(default_factory=list)   # {eid, unit_code, unit, element, ksa}
     result: str | None = None
     note: str | None = None
+    # 받지 못한 서류에서 넘겨받은 확인거리 — [{eid, ksa, from, result}]
+    carried: list[dict] = field(default_factory=list)
+    superseded: bool = False          # 넘겼으므로 이 항목이 요소를 막지 않는다
+    from_missing_document: str = ""   # 서류 미제출로 새로 생긴 항목이면 그 서류
     decided_by: str | None = None
     decided_at: datetime | None = None
 
@@ -143,6 +147,101 @@ def collect_items(els: list[dict], names: dict[str, tuple[str, str]] | None = No
                                "ksa": list(r.get("ksa_refs") or [])})
     return {m: sorted(v.values(), key=lambda i: (-i.n_elements, i.item))
             for m, v in by_method.items()}
+
+
+# ── 2단계 결과를 3·4단계로 흘려보낸다 ────────────────────────────
+#
+# AI 는 요소마다 「비어 있는 KSA」를 서류·면접·실기로 **쪼개서** 배정한다.
+# 실측 5건에서 (요소, KSA) 겹침이 0이었다 — 셋은 서로 다른 것을 맡는다.
+# 그래서 셋 다 통과해야 요소가 인정된다.
+#
+# 문제는 서류가 안 들어왔을 때였다. 요소의 60~75%가 서류에 걸려 있는데,
+# 「못 받음」 한 번에 그 요소가 곧바로 미인정이 됐다 — 면접으로 대신 확인할
+# 길이 없었다. 서류가 맡던 것을 면접·실기로 넘긴다.
+
+CARRY_TO = ("면접", "실기")           # 넘길 곳. 앞에 있는 것을 먼저 고른다
+UNFILLED = ("미통과", "미실시")       # 확인되지 않은 결과. 미실시도 안 채워진 것이다
+
+
+def carry_over(items: dict[str, list[Item]]) -> None:
+    """받지 못한 서류가 맡던 것을 면접·실기로 넘긴다.
+
+    ① 같은 요소에 **아직 안 찍은** 면접·실기 항목이 있으면 거기에 얹는다.
+       이미 찍은 항목에 얹으면 그 KSA 는 영영 확인되지 않는다.
+    ② 없으면 면접 항목을 새로 만든다. 질문은 없다 — AI 에게 다시 묻지 않고,
+       무엇을 확인해야 하는지(KSA)만 정확히 적는다.
+
+    넘긴 서류 항목에는 `superseded` 를 세워, 그것 하나 때문에 요소가
+    미인정이 되지 않게 한다. 판단은 넘겨받은 쪽의 결과가 한다.
+    """
+    src = [i for i in (items.get("추가서류") or []) if i.result in UNFILLED]
+    if not src:
+        return
+    for it in src:
+        landed = False
+        for t in it.targets:
+            host = _host_for(items, t["eid"], it)
+            if host is None:
+                host = _new_item(items, it, t["eid"])
+            host.carried.append({"eid": t["eid"], "ksa": list(t["ksa"]),
+                                 "from": it.item, "result": it.result})
+            landed = True
+        it.superseded = landed
+
+
+def _host_for(items: dict[str, list[Item]], eid: str,
+              src: "Item") -> "Item | None":
+    """이 요소를 넘겨받을 면접·실기 항목.
+
+    ① 아직 안 찍은 항목이 먼저다.
+    ② 이미 찍은 항목이라도 **서류를 못 받는다고 정한 뒤에** 찍은 것이면
+       그때 이미 넘겨받은 상태로 본 것이다. 그것을 다시 옮기면 통과한
+       실기가 헛것이 된다 — 실측 R2026-9010 에서 윤활장치 실기를 통과시켰는데
+       50시간이 붙지 않고 면접 항목이 새로 생겼다.
+    ③ 서류보다 **먼저** 찍은 것은 그 KSA 를 본 적이 없으므로 쓰지 않는다.
+    """
+    later: Item | None = None
+    for m in CARRY_TO:
+        for it in items.get(m) or []:
+            if not any(t["eid"] == eid for t in it.targets):
+                continue
+            if not it.done:
+                return it
+            if (later is None and it.decided_at and src.decided_at
+                    and it.decided_at >= src.decided_at):
+                later = it
+    return later
+
+
+def _new_item(items: dict[str, list[Item]], src: "Item", eid: str) -> "Item":
+    """넘겨받을 자리가 없으면 면접 항목을 새로 만든다.
+
+    이름은 원래 서류 항목의 글에서 뽑는다 — 같은 서류를 두 번 못 받아도
+    항목은 하나이고, 다시 열어도 같은 열쇠(item_key)가 된다.
+    """
+    txt = f"{_short(src.item, 60)} — 서류를 받지 못해 면접으로 확인"
+    k = item_key("면접", txt)
+    group = items.setdefault("면접", [])
+    for it in group:
+        if it.key == k:
+            _add_target(it, src, eid)
+            return it
+    it = Item(key=k, method="면접", item=txt,
+              reason=("2단계에서 요청한 서류를 받지 못했습니다. "
+                      "그 서류로 확인하려던 것을 면접에서 직접 확인합니다."),
+              from_missing_document=src.item)
+    _add_target(it, src, eid)
+    group.append(it)
+    return it
+
+
+def _add_target(it: "Item", src: "Item", eid: str) -> None:
+    if any(t["eid"] == eid for t in it.targets):
+        return
+    for t in src.targets:
+        if t["eid"] == eid:
+            it.targets.append(dict(t))
+            return
 
 
 def load_results(s: Session, assessment_id: int) -> dict[str, dict[str, Any]]:
@@ -263,12 +362,17 @@ def outcomes(els: list[dict], reviews: dict[str, dict],
 
         # 조건부인정 — 걸린 보완 항목이 전부 통과해야 한다
         mine = per_el.get(eid) or []
+        moved = [i for i in mine if i.superseded]
         if not mine:
             o.decision = "인정"
             o.basis.append("전문가 판단 — 조건부인정, 남은 확인 항목 없음")
             out.append(o)
             continue
-        failed = [i for i in mine if i.result == "미통과"]
+        # 넘긴 서류 항목은 여기서 빠진다 — 판단은 넘겨받은 쪽이 한다.
+        mine = [i for i in mine if not i.superseded]
+        # 「미실시」도 확인되지 않은 것이다. 통과처럼 세면 아무것도 안 하고
+        # 인정이 된다 — 실제로 그렇게 계산되고 있었다.
+        failed = [i for i in mine if i.result in UNFILLED]
         train = [i for i in mine if i.method == "훈련"]
         waiting = [i for i in mine if not i.done and i.method != "훈련"]
         if train:
@@ -276,7 +380,8 @@ def outcomes(els: list[dict], reviews: dict[str, dict],
             o.basis += [f"훈련 이수 필요 — {_short(i.item, 44)}" for i in train]
         elif failed:
             o.decision = "미인정"
-            o.basis += [f"{i.method} 「{_short(i.item)}」 미통과"
+            o.basis += [f"{i.method} 「{_short(i.item)}」 "
+                        + ("미실시" if i.result == "미실시" else "미통과")
                         + (f" ({i.decided_at:%Y-%m-%d})" if i.decided_at else "")
                         for i in failed]
         elif waiting:
@@ -289,6 +394,8 @@ def outcomes(els: list[dict], reviews: dict[str, dict],
                         for i in mine if i.passed]
             if not o.basis:
                 o.basis.append("남은 확인 항목이 모두 정리됨")
+        o.basis += [f"서류 「{_short(i.item)}」 {i.result} — 면접·실기로 넘겼습니다"
+                    for i in moved]
         out.append(o)
     return out
 
@@ -304,14 +411,33 @@ class StageState:
     total: int = 0          # 이 단계에서 다룰 것의 수
     done: int = 0           # 그중 처리된 수
     skipped: bool = False   # 다룰 것이 없어 건너뛰는 단계
+    moot: int = 0           # 결과를 더 바꾸지 못해 세지 않은 항목 수
 
     @property
     def complete(self) -> bool:
         return self.skipped or (self.total > 0 and self.done >= self.total)
 
 
+def is_live(it: Item, outcome_of: dict[str, str] | None) -> bool:
+    """이 항목이 아직 결과를 바꿀 수 있는가.
+
+    1단계에서 전문가가 「불인정」으로 정해 버린 요소에도 보완 항목이 붙어
+    있다. 그것을 그대로 세면 면접·실기 단계가 영영 끝나지 않는다 —
+    무엇을 찍어도 인정 시간이 달라지지 않는데 화면은 계속 남았다고 말한다.
+    (실측 R2026-9002: 면접 1건·실기 4건이 그랬고, 그래서 「최종」으로
+    넘어갈 수 없었다.)
+
+    대상 요소 가운데 하나라도 아직 「대기」면 살아 있는 항목이다.
+    `outcome_of` 가 없으면 판단할 재료가 없으므로 모두 살아 있다고 본다.
+    """
+    if outcome_of is None:
+        return True
+    return any(outcome_of.get(t["eid"]) == "대기" for t in it.targets)
+
+
 def stage_states(judge_total: int, judge_done: int,
-                 items: dict[str, list[Item]]) -> list[StageState]:
+                 items: dict[str, list[Item]],
+                 outcome_of: dict[str, str] | None = None) -> list[StageState]:
     out: list[StageState] = []
     for n, key, title, hint in STAGES:
         st = StageState(n=n, key=key, title=title, hint=hint)
@@ -320,8 +446,11 @@ def stage_states(judge_total: int, judge_done: int,
             st.skipped = judge_total == 0
         elif n in METHOD_OF_STAGE:
             group = items.get(METHOD_OF_STAGE[n]) or []
-            st.total = len(group)
-            st.done = sum(1 for i in group if i.done)
+            # 이미 찍은 것은 남겨 둔다 — 진척에서 사라지면 되돌아간 것처럼 보인다.
+            counted = [i for i in group if i.done or is_live(i, outcome_of)]
+            st.total = len(counted)
+            st.done = sum(1 for i in counted if i.done)
+            st.moot = len(group) - len(counted)
             st.skipped = st.total == 0
         out.append(st)
     return out

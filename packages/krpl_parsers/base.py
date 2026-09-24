@@ -20,7 +20,7 @@ class ParsedDoc:
 
 
 def supported_extensions() -> list[str]:
-    return ["hwp", "hwpx", "pdf", "txt", "md"]
+    return ["hwp", "hwpx", "pdf", "txt", "md", "docx"]
 
 
 def _from_tables(tables: list[list[list[str]]]) -> str:
@@ -52,6 +52,12 @@ def parse_file(path: str | Path) -> ParsedDoc:
         from krpl_parsers.hwpx import tables as hwpx_tables
         t = hwpx_tables(str(p))
         return ParsedDoc(str(p), ext, _from_tables(t), t, {"n_tables": len(t)})
+
+    if ext == "docx":
+        # 사람이 보는 검토용 문서를 그대로 받는다 (2026-09-23). 본문 문단과 표를 문서 순서대로 읽는다.
+        from krpl_parsers.docx_ import read as docx_read
+        text, t = docx_read(str(p))
+        return ParsedDoc(str(p), ext, text, t, {"n_tables": len(t)})
 
     if ext == "pdf":
         from pypdf import PdfReader
