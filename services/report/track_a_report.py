@@ -23,6 +23,10 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from krpl_core.config import get_rubric
+from services.report._shared import STEP_CSS, TRACK_CSS, step_head, step_nav, track_chip, STEP_CSS, step_head
+from services.report.doc_viewer import (VIEWER_CSS, VIEWER_HTML, VIEWER_JS,
+                                        js_literal, viewer_data)
+from services.review.unit_hours import evidence_aid, unit_evidence, unit_gaps
 
 e = lambda x: html.escape(str(x) if x is not None else "")   # noqa: E731
 
@@ -146,12 +150,56 @@ def _basis(evidence: list[dict]) -> str:
     return f"기준값(편성기준 · {src.removeprefix('자격:')})"
 
 
-def render_track_a(s: Session, assessment_id: int) -> str:
+GAP_CSS = """
+.gap-tbl td{vertical-align:top}
+.gap-tbl details summary{cursor:pointer;white-space:normal}
+.gap-tbl details summary .mini{display:block;color:var(--tm);font-size:11.5px;font-weight:400}
+.gap-tbl .evs{margin:8px 0 4px;padding:8px 10px;background:var(--bg,#fafafa);border-radius:8px}
+.gap-tbl .ev{margin:0 0 8px;padding-left:8px;border-left:3px solid var(--bd)}
+.gap-tbl .ev.dir{border-left-color:var(--good,#16a765)}
+.gap-tbl .ev.ind{border-left-color:var(--hold,#ffad47)}
+.gap-tbl .ev.neg{border-left-color:var(--crit,#fb4c2f);background:#fff6f5}
+.gap-tbl .ev .fit{display:inline-block;font-size:11px;font-weight:700;margin-right:6px;color:var(--ts)}
+.gap-tbl .ev q{white-space:normal;line-height:1.5}
+.gap-tbl .ev .src{font-size:11.5px;color:var(--tm);margin-top:2px;white-space:normal}
+.gap-tbl .ev .src .g{margin:0 4px;padding:0 4px;border:1px solid var(--bd);border-radius:4px}
+.gap-tbl .ev .src em{font-style:normal;color:var(--ts)}
+.gap-tbl .ev .rep{margin-left:6px;padding:0 5px;border-radius:4px;background:var(--bd);font-size:11px}
+.gap-tbl .none{font-size:12px;color:var(--tm);margin:0 0 6px}
+.gap-tbl .hint{font-size:11.5px;color:var(--tm);margin-top:6px}
+.gap-tbl .hint .ok{color:var(--good,#16a765);margin-right:8px}
+.gap-tbl .hint .no{margin-right:8px}
+.gap-tbl input.gh{width:66px;padding:4px 6px;border:1px solid var(--bd);border-radius:6px;text-align:right;font-size:13px}
+#gapsec .sum{margin:12px 0 0;padding-top:10px;border-top:1px solid var(--bd);
+ display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+#gapsec .sum-n{margin:0;font-size:13.5px}
+#gapsec .sum-a{display:flex;gap:10px;align-items:center;white-space:nowrap}
+#gapsec .sum-a #g-note{font-size:12px;color:var(--tm)}
+.gap-tbl tr.on td{background:color-mix(in srgb, var(--good) 8%, transparent)}
+.gap-tbl .need{display:block;font-size:11px;color:var(--tm);margin-top:2px}
+.gap-tbl .mark{font-weight:700}
+.gap-tbl tr.on .mark{color:var(--good)}
+#gapsec .go{border:1px solid var(--tp);background:var(--tp);color:#fff;border-radius:8px;padding:7px 16px;cursor:pointer;font-size:13px;font-weight:600}
+"""
+
+
+def render_track_a(s: Session, assessment_id: int, *, editable: bool = True) -> str:
+    """기록 확인 결과.
+
+    한 렌더러가 두 화면을 그린다 — 그러나 **이름과 할 일이 다르다.**
+
+        editable=False   `/submissions/{sid}/report/time`   ① 기록 확인 (읽기 전용)
+        editable=True    `/assessments/{aid}/review`        ③ 전문가 검토 (시간 입력·제출)
+
+    가르기 전에는 둘 다 「① 기록 확인」이라 적힌 채 입력칸과 제출 버튼을 달고
+    있었다. ③ 을 눌러 들어온 사람이 ① 을 보게 되고, 읽기만 하려던 사람에게는
+    누르면 유료 분석으로 넘어가는 버튼이 놓여 있었다.
+    """
     reviews = {r[0]: r[1] for r in s.execute(text(
         "SELECT element_id, decision FROM element_review WHERE assessment_id=:i"), {"i": assessment_id})}
     a = s.execute(text("""
         SELECT a.id, a.submission_id, a.rubric_version, a.overall_note, a.finished_at,
-               s.case_number, s.target_program_id,
+               s.case_number, s.target_program_id, s.track,
                p.official_name, p.daebunryu, p.n_units AS prog_units
         FROM assessment a JOIN submission s ON s.id=a.submission_id
         LEFT JOIN catalog_wsd_program p ON p.program_id=s.target_program_id
@@ -218,36 +266,98 @@ def render_track_a(s: Session, assessment_id: int) -> str:
     # 이력 유형 — 목표 종목 옆 괄호. 자격이 있으면 과정평가형, 없으면 훈련이수증만.
     basis_kind = "과정평가형" if src.get("자격") else ("NCS 훈련이수" if src.get("기이수") else "이수 기록 없음")
 
-    # ── 보류 단위 — 왜 부족한지, 무엇으로 보완할 수 있는지, 이미 낸 것은 무엇인지 (2차 TF) ──
+    # ── 추가 인정이 필요한 단위 (2026-09-24) ──────────────────────────
+    # 기록 확인이 50% 미만으로 떨어뜨린 단위를, 근거 분석이 뽑아 둔 조각을 보고
+    # 위원이 시간으로 메운다. 셈은 services/review/unit_hours.py 한 자리에서만 한다 —
+    # 화면이 따로 세면 개요·보고서와 갈라진다.
     rb_ta = get_rubric().track_a
     hold_evi = list(rb_ta.get("hold_evidence") or [])
     submitted = set(d.get("제출문서") or [])
     holds = [x for x in els if x["evidence_level"] == "보류"]
-    hold_sec = ""
-    if holds:
-        hrows = ""
-        for x in holds:
-            p = x["payload"]
-            c = p["completed_hours"] or 0
-            need = p["min_hours"] - c
+
+    gaps = unit_gaps(s, assessment_id)
+    ev_by_unit = unit_evidence(s, sid, [g.unit_code for g in gaps])
+    fr_json, dn_json = viewer_data(s, sid)
+    fid_meta = {f["fid"]: (f["name"], f["grade"]) for f in fr_json}
+    has_ev = evidence_aid(s, sid) is not None
+
+    def _ev_block(code: str) -> str:
+        items = ev_by_unit.get(code) or []
+        if not items:
+            return ('<p class="none">근거 분석에서 이 능력단위에 걸린 자료가 없습니다.</p>'
+                    if has_ev else
+                    f'<p class="none">근거 분석을 아직 돌리지 않았습니다. '
+                    f'<a href="/submissions/{sid}">심사 개요</a>에서 시작하세요.</p>')
+        out = ""
+        for it in items:
+            fid = (it["fids"] or [None])[0]
+            name, grade = fid_meta.get(fid or "", ("제출 자료", it["grade"] or ""))
+            fit = it["fit"]
+            cls = "neg" if fit == "부정" else ("ind" if fit == "간접" else "dir")
+            src = (f'<a class="fx" data-fid="{e(fid)}">{e(name)}</a>' if fid
+                   else f'<span>{e(name)}</span>')
+            # 같은 인용이 항목마다 되풀이되면 한 줄로 묶어 두었다 — 어디에 걸렸는지만 늘어놓는다.
+            where = e(" · ".join(it.get("elements") or [it["element_name"]]))
+            refs = ", ".join(it.get("refs") or [])
+            if refs:
+                where += " · " + e(refs)
+            n = it.get("n") or 1
+            rep = f'<span class="rep">항목 {n}곳에 같은 자료</span>' if n > 1 else ""
+            why = f'<br>{e(it["why"])}' if it["why"] else ""
+            out += (f'<div class="ev {cls}"><span class="fit">{e(fit)}</span>'
+                    f'<q>{e(it["quote"])}</q>'
+                    f'<div class="src">{src}<span class="g">{e(grade)}</span>'
+                    f'<em>{where}</em>{rep}{why}</div></div>')
+        n_neg = sum(1 for x in items if x["fit"] == "부정")
+        head = (f'<p class="none">근거 {len(items)}건'
+                + (f' · <b>부정 진술 {n_neg}건</b> — 먼저 보십시오' if n_neg else '')
+                + '</p>')
+        return head + out
+
+    gap_sec = ""
+    if gaps:
+        grows = ""
+        for g in gaps:
+            ratio = f'{g.ratio * 100:.0f}%' if g.ratio else '–'
             evi = "".join(
-                f'<div class="{"ok" if k in submitted else "no"}">{"✓" if k in submitted else "–"} {e(k)}'
-                f'{" (제출됨)" if k in submitted else ""}</div>' for k in hold_evi)
-            hrows += f"""<tr><td>{e(x['element_id'])}<br>{e(p['unit_name'])}</td>
-      <td class=n>{p['required_hours']}h</td><td class=n>{c}h ({p['ratio'] * 100:.0f}%)</td>
-      <td>{e(_basis(p.get('evidence')))}</td>
-      <td>하한 {p['min_hours']}h까지 <b>{need}h</b> 부족.<br>50% 이상이면 {p['required_hours']}h 전체 인정</td>
-      <td>{evi}</td>
-      <td class="chk"><label><input type="radio" name="dec-{e(x['element_id'])}" value="인정" data-code="{e(x['element_id'])}" data-hours="{p['required_hours']}" {'checked' if reviews.get(x['element_id']) == '인정' else ''}> 인정</label><label><input type="radio" name="dec-{e(x['element_id'])}" value="불인정" data-code="{e(x['element_id'])}" data-hours="{p['required_hours']}" {'checked' if reviews.get(x['element_id']) == '불인정' else ''}> 불인정</label></td></tr>"""
-        hold_sec = f"""<details class="tbl" open><summary>보류 {len(holds)}개 단위 — 부족 이유와 추가 증빙 (위원 판단란 포함)</summary>
-  <div class="tw"><table class="hold-tbl"><thead><tr><th>능력단위</th><th>요구</th><th>이수</th><th>근거</th>
-   <th>부족 이유</th><th>보완 가능한 추가 증빙</th><th>위원 판정</th></tr></thead><tbody>{hrows}</tbody></table></div>
-  <p id="final" class="sub" style="margin-top:10px;font-size:13.5px;color:var(--tp)"><b>위원 판정 결과</b> — 보류 {len(holds)}개 단위 중 <span id="f-undec">{len(holds)}</span>개 미결 ·
-   최종 인정 <b><span id="f-rec">{B['인정']}</span>h (<span id="f-recp">{B['인정'] / tot * 100:.0f}</span>%)</b> · 불인정 <b><span id="f-rej">{B['불인정']}</span>h</b>
-   <span class="sub">(이 화면에서만 계산됩니다. 저장은 심사 개요 화면의 최종 판정에서 합니다)</span></p>
-  <p class="sub" style="margin-top:8px">보류 구간(30~50%)은 2차 TF 제안이며 미확정입니다. 대안인 「자격 단위 인정」(국가 검정 자격은 코드 일치 단위를
-  시간과 무관하게 인정)을 적용하면 인정 시간은 <b>{B['인정'] + B['보류']}h ({(B['인정'] + B['보류']) / tot * 100:.0f}%)</b>가 됩니다.</p>
-  </details>"""
+                f'<span class="{"ok" if k in submitted else "no"}">{"✓" if k in submitted else "–"} {e(k)}</span>'
+                for k in hold_evi) if g.verdict == "보류" else ""
+            grows += f"""<tr class="gap" data-code="{e(g.unit_code)}">
+  <td><details><summary><b>{e(g.unit_name)}</b>
+       <span class="mini">{e(g.verdict)} · 근거 {len(ev_by_unit.get(g.unit_code) or [])}건</span></summary>
+       <div class="evs">{_ev_block(g.unit_code)}{('<div class="hint">보완 가능한 증빙: ' + evi + '</div>') if evi else ''}</div>
+      </details></td>
+  <td class=n>{g.required}h</td>
+  <td class=n>{g.completed or '–'}</td>
+  <td class=n>{ratio}</td>
+  <td class="chk">{f'<input type="number" class="gh" data-code="{e(g.unit_code)}" data-gap="{g.gap}" data-record="{g.record}" data-req="{g.required}" min="0" max="{g.gap}" step="1" value="{g.granted}"> h' if editable else f'<b>{g.granted}</b>h'}
+   <span class="need" data-code="{e(g.unit_code)}">{f'인정선까지 +{g.to_pass}h' if g.to_pass else '인정선 넘음'}</span></td>
+  <td class=n><span class="fin" data-code="{e(g.unit_code)}">{g.ratio_final * 100:.0f}</span>%
+   <span class="mark" data-code="{e(g.unit_code)}">{'✓' if g.passes else '✗'}</span></td>
+  <td class=n><b><span class="cred" data-code="{e(g.unit_code)}">{g.credited}</span>h</b></td></tr>"""
+
+        base = B['인정']
+        cred_sum = sum(g.credited for g in gaps)
+        floor_pct = f"{gaps[0].floor * 100:.0f}%"
+        gap_sec = f"""<section class="card" id="gapsec">
+ <header class="ch"><h2>추가 인정이 필요한 단위 {len(gaps)}개</h2>
+ <p class="sub">{'이수 기록만으로는' if editable else '이수 기록만으로는'} 요구시간의 {floor_pct}에 못 미친 단위입니다. 능력단위를 누르면
+ 근거 분석이 뽑아 둔 자료가 펼쳐지고, 문서명을 누르면 오른쪽에 원문이 열립니다.
+ 얼마를 더 인정할지 적으십시오 — <b>인정시간(이수 + 위원 인정)이 요구시간의 {floor_pct} 이상이면
+ 그 능력단위가 인정되어 요구시간 전체가 면제</b>됩니다. 못 미치면 면제는 0h 입니다.</p></header>
+ <div class="tw"><table class="hold-tbl gap-tbl">
+  <thead><tr><th>능력단위 — 누르면 근거가 펼쳐집니다</th><th>요구</th><th>이수</th>
+   <th>현재</th><th>위원 추가 인정</th><th>최종</th><th>면제</th></tr></thead>
+  <tbody>{grows}</tbody></table></div>
+ <div class="sum">
+  <p class="sum-n">면제 <b id="g-tot">{base + cred_sum}</b>h / {tot}h
+   (<span id="g-pct">{(base + cred_sum) / tot * 100:.0f}</span>%) ·
+   기록으로 확정 {base}h + 이 화면에서 <b id="g-add">{cred_sum}</b>h ·
+   남은 훈련 <b id="g-left">{tot - base - cred_sum}</b>h</p>
+  <div class="sum-a">{'<span id="g-note"></span><button id="g-submit" class="go">제출 → ④ 최종 판정</button>' if editable else '<span class="mini">읽기 전용 — 시간은 ③ 전문가 검토에서 정합니다</span>'}</div>
+ </div>
+ <p class="sub" style="margin:6px 0 0">{'제출하면 인정 시간이 저장되고 <b>④ 최종 판정</b>으로 넘어갑니다 — 인정된 시간과 면제되는 능력단위를 봅니다.' if editable else '위 단계줄에서 다른 단계로 넘어갈 수 있습니다.'}</p>
+</section>"""
 
     miss = ""
     if skipped:
@@ -284,18 +394,24 @@ def render_track_a(s: Session, assessment_id: int) -> str:
         ("추정 표시", f"이수증 없이 기준값으로 판정한 단위는, 기관이 편성기준의 최소({rng.get('min', 0.8):.0%})로 편성했어도 같은 판정인지 확인. 다르면 「추정」— 이수증 요구 (이 건 {warn_n}건)",
          "과정평가형 편성 허용범위 {0:.0%}~{1:.0%}".format(rng.get('min', 0.8), rng.get('max', 1.5)), _st(False)),
     ]
+    fr_js = js_literal(fr_json)
+    dn_js = js_literal(dn_json)
+
     param_rows = "".join(
         f"<tr><td>{e(k)}</td><td>{e(v)}</td><td>{e(src_)}</td>"
         f"<td>{'<b>' + st + '</b>' if st == 'TF 결정 필요' else st}</td><td style='min-width:160px'></td></tr>"
         for k, v, src_, st in params)
     return f"""<!doctype html><html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>RPL Track A 심사 보고서 — {e(a['case_number'])}</title><style>{CSS}</style></head>
+<title>RPL Track A 심사 보고서 — {e(a['case_number'])}</title><style>{CSS}{VIEWER_CSS}{GAP_CSS}{TRACK_CSS}{STEP_CSS}</style></head>
 <body><div class="viz">
 <div class="bk"><a href="/submissions/{sid}">← 심사 개요</a>
- <a href="/cases">접수 현황</a><button onclick="print()">인쇄</button></div>
+ <button onclick="print()">인쇄</button></div>
 
-<h1>RPL Track A 심사 보고서</h1>
+{step_head("review" if editable else "time", "RPL Track A 심사 보고서",
+           nav=step_nav(sid, assessment_id, has_ev))}
+<p class="sub" style="margin:0 0 10px">이 건의 접수 구분: {track_chip(a['track'], full=True)}
+ <span style="margin-left:6px">— 위 제목의 「Track A」는 판정 종류(기록 확인)입니다.</span></p>
 <div style="margin:0 0 10px"><span id="save" style="font-size:12px;color:var(--tm)"></span></div>
 <section class="card">
  <header class="ch">
@@ -313,7 +429,7 @@ def render_track_a(s: Session, assessment_id: int) -> str:
  </div>
  <div class="stackwrap"><div class="stack">{seg}</div><div class="slab">{slab}</div></div>
  <div class="plot">{rows}</div>
- {hold_sec}
+ {gap_sec}
  <details class="tbl"><summary>데이터 표로 보기</summary>
   <div class="tw"><table><thead><tr><th>능력단위코드</th><th>능력단위명</th><th>NCS표준</th>
    <th>요구시간</th><th>하한(−50%)</th><th>이수시간</th><th>근거</th><th>판정</th><th>신뢰도</th>
@@ -327,6 +443,7 @@ def render_track_a(s: Session, assessment_id: int) -> str:
 <tbody>{param_rows}</tbody></table></div>
 <p style="margin-top:10px">심사번호 {e(a['case_number'])} · 기준 v{e(a['rubric_version'])} · 계산 {a['finished_at']:%Y-%m-%d %H:%M} · 최종 판정은 전문가 TF가 한다.</p>
 </footer></div>
+{VIEWER_HTML}
 <script>
 (function(){{
   var TOT={tot}, R0={B['인정']}, H0={B['보류']}, J0={B['불인정']}, N0={d['by_verdict'].get('완전충족', 0) + d['by_verdict'].get('조정범위내', 0)}, NH={len(holds)}, NJ0={d['by_verdict'].get('시간부족', 0) + d['by_verdict'].get('미이수', 0)};
@@ -373,5 +490,61 @@ def render_track_a(s: Session, assessment_id: int) -> str:
   var inputs=document.querySelectorAll('input[type=radio][data-code]');
   for(var i=0;i<inputs.length;i++) inputs[i].addEventListener('change',function(ev){{ recalc(); save(ev.target); }});
   recalc();
+
+  // ── 추가 인정 시간 ──────────────────────────────────────────────
+  // 서버가 셈의 주인이다. 화면은 즉시 반응만 하고, 제출하면 서버가 돌려준 값으로 맞춘다.
+  var FR={fr_js}, DN={dn_js};
+  var BASE={B['인정']}, SID={sid};
+  var FLOOR={gaps[0].floor if gaps else 0.5};   // 인정선 — 기준서에서 온 값
+  function gsum(){{
+    var add=0;
+    document.querySelectorAll('input.gh').forEach(function(i){{
+      var gap=+i.dataset.gap, rec=+i.dataset.record, req=+i.dataset.req, v=+i.value||0;
+      if(v<0) v=0; if(v>gap) v=gap;
+      if(String(v)!==i.value) i.value=v;
+      var counted=rec+v, pct=req?counted/req:0, pass=req&&pct>=FLOOR;
+      var cred=pass?req:0; add+=cred;
+      var c=i.dataset.code;
+      var f=document.querySelector('.fin[data-code="'+c+'"]');   if(f) f.textContent=Math.round(pct*100);
+      var m=document.querySelector('.mark[data-code="'+c+'"]');  if(m) m.textContent=pass?'✓':'✗';
+      var d=document.querySelector('.cred[data-code="'+c+'"]');  if(d) d.textContent=cred;
+      var nd=document.querySelector('.need[data-code="'+c+'"]');
+      if(nd){{ var need=Math.max(0, Math.min(Math.ceil(FLOOR*req)-rec-v, gap-v));
+               nd.textContent = pass ? '인정선 넘음' : ('인정선까지 +'+need+'h'); }}
+      var row=i.closest('tr'); if(row) row.className = pass ? 'gap on' : 'gap';
+    }});
+    var total=BASE+add;
+    $('g-add').textContent=add; $('g-tot').textContent=total;
+    $('g-pct').textContent=Math.round(total/TOT*100); $('g-left').textContent=TOT-total;
+  }}
+  document.querySelectorAll('input.gh').forEach(function(i){{
+    i.addEventListener('input', gsum);
+  }});
+  var gsub=$('g-submit');
+  if(gsub) gsub.addEventListener('click', function(){{
+    if(!canSave){{ $('g-note').textContent=' 서버 없음 — 저장되지 않습니다'; return; }}
+    var hours={{}};
+    document.querySelectorAll('input.gh').forEach(function(i){{ hours[i.dataset.code]=+i.value||0; }});
+    $('g-note').textContent=' 제출 중…';
+    fetch('/assessments/'+AID+'/units/hours', {{method:'POST',
+      headers:{{'Content-Type':'application/json'}},
+      body:JSON.stringify({{hours:hours, reviewer:null}})}})
+     .then(function(x){{ if(!x.ok) throw new Error(x.status); return x.json(); }})
+     .then(function(j){{
+       j.units.forEach(function(u){{
+         var i=document.querySelector('input.gh[data-code="'+u.unit_code+'"]');
+         if(i) i.value=u.granted;
+       }});
+       gsum();
+       // ③ 전문가 검토의 다음은 ④ 최종 판정이다. 근거 분석(②)은 이 화면에 오기
+       // 전에 끝나 있어야 하는 단계이므로 여기서 되돌아가지 않는다.
+       $('g-note').textContent=' 저장됨 — 최종 판정으로 이동합니다…';
+       location.href = '/assessments/'+AID+'/exemption';
+     }})
+     .catch(function(err){{ $('g-note').textContent=' 제출 실패 — '+err.message; }});
+  }});
+  gsum();
+
+{VIEWER_JS}
 }})();
 </script></body></html>"""

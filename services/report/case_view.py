@@ -13,10 +13,14 @@
 """
 from __future__ import annotations
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from services.assess.case_state import CaseState, case_state
 from services.report.layout import e, page
+from services.report._shared import (STEP, STEP_BLOCKED, STEP_CSS, step_nav,
+                                     track_chip)
+from services.review.unit_hours import evidence_aid, unit_gaps
 
 CSS = """
 .hdr{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:2px}
@@ -176,6 +180,22 @@ def _gauge(st: CaseState) -> str:
         f' <div class="leg">{leg}</div>')
 
 
+def _step_bar(st: CaseState, sid: int, has_ev: bool) -> str:
+    """개요에도 같은 단계줄을 둔다 — 이동하는 방법이 화면마다 다르면 안 된다.
+
+    다만 개요는 어느 단계도 아니므로 「현재」 표시는 없다.
+    """
+    nav = step_nav(sid, st.time.id if st.time else None, has_ev)
+    out = ""
+    for k in ("time", "evidence", "review", "final"):
+        label = e(STEP[k][0])
+        if nav.get(k):
+            out += f'<a href="{e(nav[k])}" title="{e(STEP[k][1])}">{label}</a>'
+        else:
+            out += f'<span class="off" title="{e(STEP_BLOCKED[k])}">{label}</span>'
+    return f'<div class="step-nav">{out}</div>'
+
+
 def _step(no: str, title: str, badge: str, why: str, act: str = "",
           *, now: bool = False, off: bool = False, extra: str = "") -> str:
     cls = " now" if now else (" off" if off else "")
@@ -245,7 +265,7 @@ def render_case(s: Session, submission_id: int) -> str | None:
             why += (f' <em>이수 기록을 낸 {len(st.skipped)}개 단위는 갈음되지 '
                     f'않았습니다 — 아래에 이유를 적었습니다.</em>')
         steps += _step("①", "기록 확인", _st("완료", "ok"), why,
-                       f'<a href="/submissions/{sid}/report/time">보고서 보기</a>')
+                       f'<a href="/submissions/{sid}/report/time">① 기록 확인 보기</a>')
     elif st.n_documents == 0:
         steps += _step("①", "기록 확인", _st("대기"),
                        "제출 자료가 없습니다. 서류를 올리면 자동으로 대조합니다.",
@@ -260,8 +280,14 @@ def render_case(s: Session, submission_id: int) -> str | None:
     # 「도는 중」과 「이미 나온 보고서」는 따로 본다. 재실행 한 번에 완성된
     # 보고서가 화면에서 사라지면 안 된다.
     ev, done = st.evidence, st.evidence_done
-    report_link = (f'<a href="/submissions/{sid}/report/evidence">보고서 보기</a>'
-                   if done else "")
+    # 검증을 통과 못 한 실행(manual_review)도 산출물은 있다. 그것을 볼 길을 막아 두면
+    # 위원이 결과를 보려고 「다시 시도」를 누르게 된다 — 누를 때마다 AI 실호출이다.
+    # 실제로 그렇게 한 건에서 $0.81 이 더 나갔다.
+    # 「볼 수 있는 결과가 있나」는 보고서 라우트와 **같은 함수**로 판단한다.
+    # 각자 세면 갈라진다 — 개요는 최신 실행만 보고 라우트는 요소가 있는 실행을 골라서,
+    # 뒤에 빈 실행이 한 번 돌면 개요에서 링크가 사라지고 URL 로는 열리는 상태가 됐다.
+    report_link = (f'<a href="/submissions/{sid}/report/evidence">② 근거 분석 보기</a>'
+                   if evidence_aid(s, sid) else "")
     if st.analyzing:
         n_done, n_all, phase, _left = ev.steps if ev else (0, 0, "", [])
         pct = n_done / n_all * 100 if ev and ev.running and n_all else 0
@@ -291,19 +317,31 @@ def render_case(s: Session, submission_id: int) -> str | None:
                            why, report_link or '<a href="">새로 고침</a>',
                            now=True, extra=bar)
     elif ev is not None and ev.broke and not done:
-        # 끝났는데 쓸 수 없다. 이것을 감추면 「시작」 버튼만 다시 떠서
-        # 눌러도 아무 일이 없는 것처럼 보인다.
-        steps += _step("②", "근거 분석",
-                       _st("확인 필요" if ev.status == "manual_review" else "실패", "no"),
-                       f"{e(ev.trouble)}<em> 호출 {ev.attempts}회 · "
-                       f"{ev.finished_at:%m-%d %H:%M}</em>"
-                       "<br>같은 자료로 다시 돌리면 같은 곳에서 막힙니다. "
-                       "감사 기록에서 무엇이 어긋났는지 보실 수 있습니다.",
-                       f'<a href="/audit/{e(st.case_number)}">감사 기록</a>'
-                       f'<form method="post" action="/submissions/{sid}/analyze" '
-                       f'style="display:inline;margin-left:6px">'
-                       f'<button type="submit">다시 시도</button></form>',
-                       now=True)
+        # 끝났는데 기계 검증을 다 통과하지 못했다. 그래도 판단한 항목은 남아 있으므로
+        # 사람이 읽고 「확인」하면 넘어간다 — ② 는 읽는 자리라 눌러서 바뀌는 것이
+        # 없었고, 그래서 이 칸이 영영 「확인 필요」에 머물렀다.
+        confirm = (f'<form method="post" action="/submissions/{sid}/evidence/confirm" '
+                   f'style="display:inline;margin-left:10px">'
+                   f'<button class="go" type="submit">확인 완료</button></form>')
+        again = (f'<form method="post" action="/submissions/{sid}/analyze" '
+                 f'style="display:inline;margin-left:10px">'
+                 f'<button type="submit">다시 시도 (AI 재호출 · 약 $1)</button></form>')
+        if st.evidence_ack:
+            steps += _step("②", "근거 분석", _st("확인함", "ok"),
+                           f"{e(ev.trouble)}<em> 호출 {ev.attempts}회"
+                           f"{f' · {ev.finished_at:%m-%d %H:%M}' if ev.finished_at else ''}</em>"
+                           "<br>기계 검증은 다 통과하지 못했지만 <b>읽고 넘어가신 결과</b>입니다.",
+                           (report_link or '') + again)
+        else:
+            steps += _step("②", "근거 분석",
+                           _st("확인 필요" if ev.status == "manual_review" else "실패", "no"),
+                           f"{e(ev.trouble)}<em> 호출 {ev.attempts}회"
+                           f"{f' · {ev.finished_at:%m-%d %H:%M}' if ev.finished_at else ''}</em>"
+                           "<br><b>결과는 그대로 보실 수 있습니다.</b> 기계 검증을 다 통과하지 "
+                           "못했을 뿐이며, 판단한 항목은 남아 있습니다. 읽어 보신 뒤 "
+                           "<b>확인 완료</b>를 누르면 ③ 으로 넘어갑니다.",
+                           (report_link or '') + confirm + again,
+                           now=True)
     elif done:
         # 재판정한 건은 마지막 실행분만 보이면 실제보다 싸 보인다.
         cost = f" · 비용 ${st.runs_cost:.2f}" if st.runs_cost else ""
@@ -326,7 +364,7 @@ def render_case(s: Session, submission_id: int) -> str | None:
                        f"({e(kinds)} 등). 기록 확인으로 덮이지 않은 "
                        f"<b>{st.open_hours}시간</b>을 이 자료로 따져 볼 수 있습니다.{failed}",
                        f'<form method="post" action="/submissions/{sid}/analyze">'
-                       f'<button class="go" type="submit">근거 분석 시작</button></form>',
+                       f'<button class="go" type="submit">② 근거 분석 시작</button></form>',
                        now=True)
     else:
         steps += _step("②", "근거 분석", _st("해당 없음"),
@@ -334,42 +372,74 @@ def render_case(s: Session, submission_id: int) -> str | None:
                        off=True)
 
     # ── ③ 전문가 검토 ──────────────────────────────────────────────
-    # 다섯 단계로 나뉜다 — 인정검토 → 추가서류 → 면접 → 실기 → 최종.
-    # 어느 단계에 서 있는지를 개요에서도 보여 준다.
-    if done:
-        stg = _stage_links(st, done.id)
-        if st.review_done:
-            steps += _step("③", "전문가 검토", _st("완료", "ok"),
-                           f"판단이 필요한 {st.n_judge}개 항목을 모두 정하셨습니다."
-                           + (f" 나머지 {st.n_settled}개는 이수 기록으로 확정된 것입니다."
-                              if st.n_settled else "")
-                           + stg,
-                           f'<a href="/assessments/{done.id}/review/{st.next_stage}">'
-                           f'{st.next_stage}단계 열기</a>')
-        else:
-            settled = (f" 나머지 <b>{st.n_settled}개</b>는 이수 기록으로 확정돼 "
-                       f"확인만 하시면 됩니다." if st.n_settled else "")
-            steps += _step("③", "전문가 검토",
-                           _st(f"{st.judged}/{st.n_judge}", "wn"),
-                           f"보고서 {done.n_elements}개 항목 가운데 "
-                           f"<b>{st.review_left}개</b>가 판단 대상입니다.{settled}"
-                           + stg,
-                           f'<a class="go" href="/assessments/{done.id}/review/'
-                           f'{st.next_stage}">검토하기</a>',
-                           now=True)
-    else:
+    # 시간이 모자란 단위를 위원이 메우는 자리다. 진행 상태는 저장된 인정 시간으로
+    # 센다 — 예전에는 Track B 5단계 검토만 보고 있어서, 위원이 ③ 을 다 마쳐도
+    # 개요는 「대기」에 머물렀다.
+    gaps = unit_gaps(s, st.time.id) if st.time else []
+    # Track B 로 접수한 건은 다섯 단계 검토가 따로 있다. 그 줄을 없애면 면접 질문지와
+    # 실기 과제 목록으로 가는 길이 사라진다 — 실제로 그 질문을 받았던 자리다.
+    stg = _stage_links(st, done.id) if done else ""
+    # 근거 분석 결과가 있으면 그쪽 검토 수치도 함께 말한다 — 개요와 검토 화면이
+    # 다른 수를 말하면 어느 쪽을 믿어야 할지 알 수 없다.
+    if done and st.n_settled:
+        stg = (f'<em> 근거 분석 항목 가운데 <b>{st.n_settled}개</b>는 '
+               f'이수 기록으로 확정된 것입니다.</em>') + stg
+    if st.time is None:
         steps += _step("③", "전문가 검토", _st("대기"),
-                       "근거 분석이 끝나면 판단할 항목이 나옵니다.", off=True)
+                       "기록 확인이 끝나면 정할 것이 나옵니다." + stg, off=True)
+    elif not gaps:
+        steps += _step("③", "전문가 검토", _st("해당 없음", "ok"),
+                       "모든 능력단위가 이수 기록만으로 인정선을 넘었습니다. "
+                       "위원이 더 정할 것이 없습니다." + stg,
+                       f'<a href="/assessments/{st.time.id}/review">③ 전문가 검토 보기</a>')
+    else:
+        decided = {r[0] for r in s.execute(text(
+            """SELECT element_id FROM element_review
+               WHERE assessment_id=:a AND granted_hours IS NOT NULL"""),
+            {"a": st.time.id})}
+        n_done = sum(1 for g in gaps if g.unit_code in decided)
+        passed = [g for g in gaps if g.passes]
+        note = (f" 그 가운데 <b>{len(passed)}개</b>가 인정선을 넘었습니다."
+                if passed else "")
+        act = (f'<a href="/assessments/{st.time.id}/review">③ 전문가 검토 보기</a>'
+               if n_done >= len(gaps) else
+               f'<a class="go" href="/assessments/{st.time.id}/review">③ 전문가 검토</a>')
+        if n_done >= len(gaps):
+            steps += _step("③", "전문가 검토", _st("완료", "ok"),
+                           f"추가 인정이 필요한 <b>{len(gaps)}개</b> 단위를 모두 정하셨습니다."
+                           + note + stg, act)
+        else:
+            ev_note = ("" if evidence_aid(s, sid) else
+                       " <em>근거 분석을 먼저 돌리면 판단할 자료가 함께 보입니다.</em>")
+            steps += _step("③", "전문가 검토",
+                           _st(f"{n_done}/{len(gaps)}", "wn" if n_done else "ac"),
+                           f"이수 기록만으로는 인정선에 못 미친 단위가 "
+                           f"<b>{len(gaps)}개</b> 있습니다. 근거를 보고 추가 인정 시간을 "
+                           f"정하십시오.{note}{ev_note}{stg}", act,
+                           now=bool(done or st.evidence_ack or not st.can_analyze))
 
     # ── ④ 최종 판정 ────────────────────────────────────────────────
+    # 면제 시간은 위원이 정한 값까지 반영한 결과다. 판정 기록 전에도 보여 준다 —
+    # 「지금까지 얼마가 면제되나」가 ③ 을 계속할지 정하는 근거이기 때문이다.
+    if st.time:
+        credited = st.credited_hours + sum(g.credited for g in gaps)
+        pct = credited / st.total_hours * 100 if st.total_hours else 0
+        look = f'<a href="/assessments/{st.time.id}/exemption">④ 최종 판정 보기</a>'
+    else:
+        credited, pct, look = 0, 0, ""
+
     if st.decision:
         d = st.decision
         h = (f" · 인정 {d['recognized_hours']}시간"
              if d.get("recognized_hours") is not None else "")
         steps += _step("④", "최종 판정", _st(str(d["decision"]), "ok"),
                        f"{e(d.get('decided_by') or '심사자')}{h}"
-                       f"<em> {e(d.get('reason') or '')}</em>",
-                       f'<a href="/audit/{e(st.case_number)}">기록 보기</a>')
+                       f"<em> {e(d.get('reason') or '')}</em>", look)
+    elif st.time:
+        steps += _step("④", "최종 판정", _st("기록 전", "wn" if credited else ""),
+                       f"지금까지 <b>{credited}시간</b>이 면제됩니다 "
+                       f"({pct:.0f}% · 남은 훈련 {st.total_hours - credited}시간). "
+                       "확정하면 여기에 기록합니다.", look)
     else:
         steps += _step("④", "최종 판정", _st("아직"),
                        "검토를 마치면 전체·부분·불인정을 기록합니다.", off=True)
@@ -396,8 +466,9 @@ def render_case(s: Session, submission_id: int) -> str | None:
 
     tot = st.total_hours
     body = f"""<div class="hdr"><h1>{e(st.case_number)}</h1>
- {_st(e(st.program_name))}</div>
+ {_st(e(st.program_name))}{track_chip(st.track, full=True)}</div>
 <p class="sub">총 필수 {tot}시간 · 접수 {st.received_at:%Y-%m-%d} · 제출 자료 {st.n_documents}건</p>
+{_step_bar(st, sid, evidence_aid(s, sid) is not None)}
 
 <div class="gauge">
  {_gauge(st)}
@@ -407,8 +478,7 @@ def render_case(s: Session, submission_id: int) -> str | None:
 
 <h2>제출 자료</h2>
 <div class="docs">{doc_line or '아직 없습니다.'}
- <div class="sub" style="margin:6px 0 0">인용 가능한 조각 {st.n_fragments}개 ·
-  <a href="/audit/{e(st.case_number)}">감사 기록 보기</a></div>
+ <div class="sub" style="margin:6px 0 0">인용 가능한 조각 {st.n_fragments}개</div>
  {miss}
 </div>"""
     scripts = ""

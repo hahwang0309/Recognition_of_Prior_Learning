@@ -8,6 +8,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from services.report.layout import e, page
+from services.report._shared import track_chip
 
 # 상태 → (묶음 이름, 배지). 「다음 할 일」은 여기서 정하지 않는다 —
 # case_state.next_step 이 정한다. 목록과 개요가 다른 말을 하면 안 된다.
@@ -115,7 +116,7 @@ def render_dashboard(rows: list[dict], queue: dict, worker_ok: bool,
                    f'{r["recognized_hours"]}/{r["total_hours"]}h</span>'
                    if r["decision"] else "")
             body += f"""<tr>
- <td><a href="/submissions/{r['id']}"><b>{e(r['case_number'])}</b></a></td>
+ <td><a href="/submissions/{r['id']}"><b>{e(r['case_number'])}</b></a>{track_chip(r.get('track'))}</td>
  <td>{e(r['official_name'] or r['target_program_id'])}
      <span class="mini">서류 {r['n_doc']} · {e(r.get('hours_note') or '')}</span></td>
  <td>{prog}</td>

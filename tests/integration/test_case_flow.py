@@ -133,34 +133,102 @@ def test_case_number_opens_the_overview(client, sid):
 
 
 def test_overview_links_to_both_reports(client, sid):
-    """근거 분석 보고서 링크는 분석이 끝났을 때만 나온다 —
-    아직 안 돈 건에 「보고서 보기」를 내밀면 눌러 봐야 404 다."""
+    """근거 분석 링크는 **볼 수 있는 결과가 있을 때** 나온다.
+
+    예전에는 「검증까지 통과한 판정(done)」일 때만 내밀었다. 그런데 검증을 다
+    통과하지 못한 실행(manual_review)도 판단한 항목은 남아 있다. 그것을 볼 길을
+    막아 두면 위원이 결과를 보려고 「다시 시도」를 누르고, 그때마다 AI 실호출이
+    나간다 — 실제로 한 건에서 $0.81 이 더 나갔다.
+    """
     h = client.get(f"/submissions/{sid}").text
     assert f"/submissions/{sid}/report/time" in h
     with session_scope() as s:
-        st = case_state(s, sid)
-    if st.evidence_done:
-        assert f"/submissions/{sid}/report/evidence" in h
+        usable = s.execute(text("""SELECT count(*) FROM assessment a
+            WHERE a.submission_id=:i AND a.kind='evidence'
+              AND a.status IN ('done','manual_review')
+              AND EXISTS (SELECT 1 FROM assessment_element e WHERE e.assessment_id=a.id)"""),
+            {"i": sid}).scalar_one()
+    if usable:
+        assert f"/submissions/{sid}/report/evidence" in h, "볼 수 있는 결과인데 들어갈 길이 없다"
     else:
         assert f"/submissions/{sid}/report/evidence" not in h
         assert "근거 분석 시작" in h or "해당 없음" in h or "진행 중" in h
 
 
 def test_both_reports_render(client, sid):
+    """확정 포맷 전체 보고서는 `/assessments/{aid}/report` 에 있다.
+
+    `/submissions/{sid}/report/evidence` 는 「추가 인정이 필요한 단위를 문서별
+    근거로 본다」에 집중한 화면으로 따로 만들었다(2026-09-24). 회람본 그대로의
+    세 장짜리 보고서는 옮겨 두었고, 여기서 그것을 확인한다.
+    """
     t = client.get(f"/submissions/{sid}/report/time")
     assert t.status_code == 200 and "RPL Track A 심사 보고서" in t.text
-    ev = client.get(f"/submissions/{sid}/report/evidence")
     with session_scope() as s:
         st = case_state(s, sid)
-    if not st.evidence_done:
-        assert ev.status_code == 404          # 아직 안 돌았다
+        aid = s.execute(text("""SELECT a.id FROM assessment a
+            WHERE a.submission_id=:i AND a.kind='evidence'
+              AND a.status IN ('done','manual_review')
+              AND EXISTS (SELECT 1 FROM assessment_element e WHERE e.assessment_id=a.id)
+            ORDER BY a.id DESC LIMIT 1"""), {"i": sid}).scalar()
+    if aid is None:
+        assert client.get(f"/submissions/{sid}/report/evidence").status_code == 404
+        assert not st.evidence_done           # 아직 볼 것이 없다
         return
+    ev = client.get(f"/assessments/{aid}/report")
     assert ev.status_code == 200 and "RPL Track B 심사 보고서" in ev.text
     # 연구팀 확정 포맷의 세 장이 모두 있어야 한다
     for chap in ("Ⅰ. 히트맵", "Ⅱ. 보완계획", "Ⅲ. 능력단위요소별 판정 근거"):
         assert chap in ev.text, f"확정 포맷의 「{chap}」 이 빠졌다"
-    # 보고서에서 검토로 가는 길이 있어야 한다 — 읽고 나서 판단한다
-    assert "전문가 검토로" in ev.text
+    # 회람본에서 단계 화면으로 돌아갈 길이 있어야 한다. 이름은 단계 이름으로 쓴다
+    # (예전에는 「전문가 검토로」였는데 같은 곳을 화면마다 다르게 불렀다).
+    assert "② 근거 분석" in ev.text
+
+
+def test_evidence_report_opens_when_validation_was_exhausted(client, sid):
+    """검증을 못 통과한 판정(manual_review)도 보고서로 열린다.
+
+    3회 안에 통과하지 못해도 산출물은 저장한다 — 전문가가 볼 것이 아무것도
+    없는 상태가 가장 나쁘기 때문이다. 그런데 보고서만 `status='done'` 을 찾아
+    404 였다. 같은 판정을 위원 페이지(`/panel`)는 그려 주고 있었다.
+    """
+    with session_scope() as s:
+        prev = [dict(r) for r in s.execute(text("""SELECT id, status FROM assessment
+            WHERE submission_id=:i AND kind='evidence'"""), {"i": sid}).mappings()]
+    if not any(r["status"] == "done" for r in prev):
+        pytest.skip("근거 분석 결과 없음")
+    try:
+        with session_scope() as s:
+            s.execute(text("""UPDATE assessment SET status='manual_review'
+                WHERE submission_id=:i AND kind='evidence'"""), {"i": sid})
+        r = client.get(f"/submissions/{sid}/report/evidence")
+        assert r.status_code == 200, "검증 미통과 판정의 보고서가 열리지 않는다"
+        assert "RPL Track B 심사 보고서" in r.text
+    finally:
+        with session_scope() as s:
+            for r in prev:
+                s.execute(text("UPDATE assessment SET status=:s WHERE id=:i"),
+                          {"s": r["status"], "i": r["id"]})
+
+
+def test_evidence_report_stays_404_without_any_result(client):
+    """요소가 하나도 없는 실패(failed)는 그대로 404 다 — 그릴 것이 없다."""
+    with session_scope() as s:
+        sid2 = s.execute(text("SELECT id FROM submission WHERE case_number='R2026-0001'")).scalar()
+        if sid2 is None:
+            pytest.skip("제빵 사례 없음")
+        prev = [dict(r) for r in s.execute(text("""SELECT id, status FROM assessment
+            WHERE submission_id=:i AND kind='evidence'"""), {"i": sid2}).mappings()]
+    try:
+        with session_scope() as s:
+            s.execute(text("""UPDATE assessment SET status='failed'
+                WHERE submission_id=:i AND kind='evidence'"""), {"i": sid2})
+        assert client.get(f"/submissions/{sid2}/report/evidence").status_code == 404
+    finally:
+        with session_scope() as s:
+            for r in prev:
+                s.execute(text("UPDATE assessment SET status=:s WHERE id=:i"),
+                          {"s": r["status"], "i": r["id"]})
 
 
 def test_reports_agree_on_hours(client, sid):
@@ -173,10 +241,15 @@ def test_reports_agree_on_hours(client, sid):
 
 def test_reports_use_names_not_codes(client, sid):
     """이름은 기준에 있는 값이다. AI 가 받아 적어 준 것에 기대면 코드만 뜬다."""
-    r = client.get(f"/submissions/{sid}/report/evidence")
-    if r.status_code == 404:
+    with session_scope() as s:
+        aid = s.execute(text("""SELECT a.id FROM assessment a
+            WHERE a.submission_id=:i AND a.kind='evidence'
+              AND a.status IN ('done','manual_review')
+              AND EXISTS (SELECT 1 FROM assessment_element e WHERE e.assessment_id=a.id)
+            ORDER BY a.id DESC LIMIT 1"""), {"i": sid}).scalar()
+    if aid is None:
         pytest.skip("근거 분석 결과 없음")
-    h = r.text
+    h = client.get(f"/assessments/{aid}/report").text
     with session_scope() as s:
         names = [r[0] for r in s.execute(text("""
             SELECT DISTINCT e.element_name FROM catalog_ncs_element e
@@ -384,3 +457,74 @@ def test_the_case_list_counts_the_same_things_as_the_overview(client, sid):
     row = h[i:i + 1200]
     assert f"검토 {st_.judged}/{st_.n_judge}" in row, "목록이 개요와 다르게 센다"
     assert f"/{st_.n_elements}<" not in row
+
+
+def test_every_screen_says_which_track_was_received(client, sid):
+    """접수부터 결과까지 어느 트랙으로 접수됐는지 알 수 있어야 한다.
+
+    「Track A/B」가 이 앱에서 두 가지를 가리킨다 — 접수 구분(submission.track)과
+    판정 종류(assessment.kind). 보고서 제목은 판정 종류이고 연구팀 확정 포맷이라
+    고칠 수 없으므로, 접수 구분은 배지로 따로 적는다. 실제로 A 로 접수한 건에서
+    Track B 보고서를 보고 「내가 A 로 한 것 맞나」를 확인할 길이 없었다.
+    """
+    with session_scope() as s:
+        track = s.execute(text("SELECT track FROM submission WHERE id=:i"),
+                          {"i": sid}).scalar_one()
+    from services.report._shared import TRACK
+    short = TRACK[track][0]
+
+    for path in ("/", "/cases", f"/submissions/{sid}", f"/submissions/{sid}/upload"):
+        h = client.get(path).text
+        if path == "/" and CASE not in h:
+            continue                      # 홈은 최근 5건만 싣는다
+        assert 'class="trk' in h, f"{path} 에 접수 구분 배지가 없다"
+        assert short in h, f"{path} 의 배지가 접수 구분({track})과 다르다"
+
+
+def test_the_reports_separate_the_two_meanings_of_track(client, sid):
+    """보고서 제목의 Track 은 판정 종류다. 접수 구분은 따로 적는다."""
+    with session_scope() as s:
+        track = s.execute(text("SELECT track FROM submission WHERE id=:i"),
+                          {"i": sid}).scalar_one()
+        aid = s.execute(text("""SELECT id FROM assessment WHERE submission_id=:i
+                                AND kind='time' ORDER BY id DESC LIMIT 1"""),
+                        {"i": sid}).scalar()
+    if aid is None:
+        pytest.skip("기록 확인 판정 없음")
+    from services.report._shared import TRACK
+    h = client.get(f"/assessments/{aid}/review").text
+    assert "RPL Track A 심사 보고서" in h, "확정 포맷의 제목은 그대로여야 한다"
+    assert "이 건의 접수 구분" in h
+    assert TRACK[track][0] in h
+    assert "판정 종류" in h, "제목의 Track 이 무엇을 뜻하는지 밝혀야 한다"
+
+
+def test_a_run_that_failed_validation_is_still_reachable(client, sid):
+    """검증을 못 통과한 실행도 개요에서 바로 열 수 있어야 한다.
+
+    막아 두면 결과를 보려고 「다시 시도」를 누르게 되고, 그것은 유료 재호출이다.
+    """
+    with session_scope() as s:
+        rows = [dict(r) for r in s.execute(text("""SELECT id, status FROM assessment
+            WHERE submission_id=:i AND kind='evidence'"""), {"i": sid}).mappings()]
+    if not rows:
+        pytest.skip("근거 분석 판정 없음")
+    try:
+        with session_scope() as s:
+            s.execute(text("""UPDATE assessment SET status='manual_review'
+                WHERE submission_id=:i AND kind='evidence'"""), {"i": sid})
+        h = client.get(f"/submissions/{sid}").text
+        assert f"/submissions/{sid}/report/evidence" in h, "볼 길이 없다"
+        assert "결과는 그대로 보실 수 있습니다" in h
+        assert client.get(f"/submissions/{sid}/report/evidence").status_code == 200
+    finally:
+        with session_scope() as s:
+            for r in rows:
+                s.execute(text("UPDATE assessment SET status=:s WHERE id=:i"),
+                          {"s": r["status"], "i": r["id"]})
+
+
+def test_the_overview_does_not_link_to_the_audit_trail(client, sid):
+    """감사 기록은 감사 화면에서 한 번에 본다 — 개요에서 갈래를 늘리지 않는다."""
+    h = client.get(f"/submissions/{sid}").text
+    assert "/audit/" not in h, "개요에 감사 기록 링크가 남아 있다"

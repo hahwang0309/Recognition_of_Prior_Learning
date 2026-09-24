@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 from services.report.layout import e, page
+from services.report._shared import track_chip
 
 # 화면 흐름과 같은 순서·같은 말을 쓴다. 여기만 옛 이름으로 남으면
 # 「분석·대조」가 무엇인지 화면 어디서도 찾을 수 없다.
@@ -82,7 +83,7 @@ def render_home(todo: dict, recent: list[dict], total: int,
                    for n, t, d, href in STEPS)
 
     rows = "".join(f"""<tr>
- <td><a href="/submissions/{r['id']}"><b>{e(r['case_number'])}</b></a></td>
+ <td><a href="/submissions/{r['id']}"><b>{e(r['case_number'])}</b></a>{track_chip(r.get('track'))}</td>
  <td>{e(r['official_name'] or r['target_program_id'])}</td>
  <td><span class="st">{e(r['step'])}</span></td>
  <td class="n" style="color:var(--tm);font-size:11.5px">{r['received_at']:%m-%d %H:%M}</td>

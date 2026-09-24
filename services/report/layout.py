@@ -29,7 +29,9 @@ REC = {"R0": ("r0", "기이수 인정검토", "이미 평가를 마친 항목 �
 def rec_name(code: str) -> str:
     return REC.get(code, ("", code, ""))[1]
 
-BASE = """*{box-sizing:border-box}
+from services.report._shared import STEP_CSS, TRACK_CSS  # noqa: E402
+
+BASE = TRACK_CSS + STEP_CSS + """*{box-sizing:border-box}
 :root{--s1:#fcfcfb;--s2:#f4f4f1;--s3:#eceae4;--bd:#e0e0da;--tp:#0b0b0b;--ts:#4a4a46;
  /* --tm 은 라벨·캡션에 쓰인다(11~12.5px). 가장 밝은 배경(--s3)에서도 4.5:1 을 넘겨야 한다.
     이전 #84837c 는 3.16~3.71 로 미달이었다. 다크 모드는 그대로 둔다 — 거기서는 통과한다. */

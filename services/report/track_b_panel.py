@@ -21,7 +21,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from krpl_core.config import get_rubric
-from services.report._shared import param_table, pending
+from services.report._shared import TRACK_CSS, param_table, pending, track_chip, STEP_CSS, step_head
+from services.report.doc_viewer import js_literal
 from services.report.track_a_report import CSS as BASE_CSS
 from services.review.coverage import ADD, Q, S, element_coverage, three_point, unit_by_coverage
 from services.review.time_axis import band as time_band, extract as time_extract
@@ -103,10 +104,8 @@ def _cite(txt: str, frag_by_fid: dict, doc_by_key: dict) -> str:
     return "".join(out)
 
 
-def _js(o) -> str:
-    """<script> 안에 넣는 JSON — 문서 조각에 '</script>' 같은 문자열이 있어도 스크립트를 깨지 못하게 이스케이프."""
-    return (json.dumps(o, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e")
-            .replace("&", "\\u0026").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029"))
+# <script> 안에 넣는 JSON — 이스케이프는 doc_viewer 한 곳에서만 한다.
+_js = js_literal
 
 
 def _fno(fid: str) -> int:
@@ -127,7 +126,7 @@ def render_panel(s: Session, assessment_id: int) -> str:
     rb = get_rubric()
     a = s.execute(text("""
         SELECT a.id, a.submission_id, a.rubric_version, a.model, a.finished_at,
-               s.case_number, s.target_program_id, p.official_name, p.total_hours
+               s.case_number, s.target_program_id, s.track, p.official_name, p.total_hours
         FROM assessment a JOIN submission s ON s.id=a.submission_id
         LEFT JOIN catalog_wsd_program p ON p.program_id=s.target_program_id
         WHERE a.id=:i"""), {"i": assessment_id}).mappings().one()
@@ -298,13 +297,15 @@ def render_panel(s: Session, assessment_id: int) -> str:
 
     return f"""<!doctype html><html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>RPL Track B 위원 페이지 — {e(a['case_number'])}</title><style>{BASE_CSS}{EXTRA_CSS}</style></head>
+<title>RPL Track B 위원 페이지 — {e(a['case_number'])}</title><style>{BASE_CSS}{EXTRA_CSS}{TRACK_CSS}{STEP_CSS}</style></head>
 <body><div class="viz">
 <div class="bk"><a href="/submissions/{sid}">← 심사 개요</a><a href="/assessments/{assessment_id}/report">근거 상세</a><button onclick="print()">인쇄</button></div>
-<h1>RPL Track B 심사 보고서</h1>
+{step_head("evidence", "RPL Track B 심사 보고서")}
+<p class="sub" style="margin:0 0 10px">이 건의 접수 구분: {track_chip(a['track'], full=True)}
+ <span style="margin-left:6px">— 위 제목의 「Track B」는 판정 종류(근거 분석)입니다.</span></p>
 <div style="margin:0 0 10px;display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span id="save"></span>
 <form method="post" action="/assessments/{assessment_id}/panel/submit" id="submit-f" style="margin:0;display:none">
-<button type="submit" style="font:inherit;font-size:13px;padding:7px 15px;border-radius:8px;border:1px solid var(--tp);background:var(--tp);color:#fff;cursor:pointer">제출 → 확인 계획</button>
+<button type="submit" class="go">제출 → 확인 계획</button>
 <span class="sub" style="margin-left:8px">{('마지막 제출 ' + e(submitted) + ' · <a href="/assessments/' + str(assessment_id) + '/plan">계획 보기</a>') if submitted else '항목 검토를 마치면 누릅니다'}</span></form></div>
 
 <section class="card">

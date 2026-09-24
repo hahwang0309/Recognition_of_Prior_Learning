@@ -172,6 +172,15 @@ class ElementReviewOut(BaseModel):
     agrees_with_ai: bool
 
 
+class UnitHoursIn(BaseModel):
+    """능력단위별 추가 인정 시간. `{능력단위코드: 시간}`.
+
+    부족분을 넘는 값은 저장 쪽에서 잘린다 — 화면만 믿지 않는다.
+    """
+    hours: dict[str, int] = Field(default_factory=dict)
+    reviewer: str | None = None
+
+
 class BulkReviewIn(BaseModel):
     """여러 요소에 같은 의견을 한 번에. 「코드가 확정한 12개 전부 인정」 같은 경우."""
     element_ids: list[str] = Field(min_length=1, max_length=500)

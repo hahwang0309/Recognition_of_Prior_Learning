@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 
 from services.report.layout import e, page
+from services.report._shared import track_chip
 
 CSS = """
 .pick{position:relative}
@@ -194,7 +195,7 @@ def render_upload(sub: dict, doc_types: list[dict], grades: list[str],
     body = f"""
 <h1>{e(sub['case_number'])} — 서류 올리기</h1>
 <p class="sub">{e(sub['official_name'] or sub['target_program_id'])} ·
- Track {e(sub['track'])} · 현재 {e(sub['status'])}</p>
+ 접수 구분 {track_chip(sub['track'], full=True)} · 현재 {e(sub['status'])}</p>
 
 <div class="note">
  서류마다 <b>종류</b>와 <b>신뢰도 등급</b>을 지정해 주세요. 이 등급이 판정 근거의 무게가 됩니다.

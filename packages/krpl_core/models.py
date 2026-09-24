@@ -279,6 +279,9 @@ class ElementReview(Base):
     reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     # 위원이 「인정 불가」로 뺀 근거의 fid 목록 — 깎아 가는 방식 (2026-09-23, 3차 TF 후 협의)
     excluded_evidence: Mapped[list | None] = mapped_column(JSONB)
+    # 위원이 그 능력단위에 추가로 인정한 시간 (2026-09-24). 기록 확인 판정에서만 쓴다 —
+    # 그때의 element_id 는 능력단위 코드다. 요소별 검토에서는 비어 있다.
+    granted_hours: Mapped[int | None]
     __table_args__ = (UniqueConstraint("assessment_id", "element_id"),)
 
 

@@ -29,6 +29,9 @@ from services.review import (
     save_result, set_stage,
 )
 from services.review.plan import submit as plan_submit
+from services.review.unit_hours import evidence_aid, save_unit_hours, unit_gaps
+from services.report.exemption import render_exemption
+from services.report.evidence_focus import render_evidence_focus
 from services.review import close as review_close
 from services.review import load as review_ctx
 from services.gateway.schemas import (
@@ -36,7 +39,7 @@ from services.gateway.schemas import (
     DecisionOut,
     ElementOut, ElementReviewIn, ElementReviewOut, FragmentOut, IngestOut,
     IngestRequest, ProgramOut, RecommendOut, ReviewSummaryOut, SubmissionCreate,
-    GuessIn, GuessOut,
+    GuessIn, GuessOut, UnitHoursIn,
     RemediationIn, RemediationOut,
     SubmissionOut, TrackBAssessmentOut, TrackBElementOut, ValidationAttemptOut,
 )
@@ -360,6 +363,44 @@ def save_reviews(aid: int, body: BulkReviewIn, s: Session = Depends(get_session)
     return out
 
 
+@app.post("/assessments/{aid}/units/hours")
+def save_unit_credit(aid: int, body: UnitHoursIn, s: Session = Depends(get_session)):
+    """능력단위별 추가 인정 시간을 저장한다 — 기록 확인 판정의 위원 페이지.
+
+    돌려주는 것은 저장 **뒤**의 셈이다. 화면이 자기 계산을 믿고 그리면
+    서버와 갈라진다 — 실제로 네 군데가 그렇게 갈라진 적이 있다.
+    """
+    _need_assessment(s, aid)
+    gaps = save_unit_hours(s, aid, body.hours, body.reviewer)
+    return {"assessment_id": aid,
+            "units": [{"unit_code": g.unit_code, "unit_name": g.unit_name,
+                       "required": g.required, "record": g.record, "gap": g.gap,
+                       "granted": g.granted, "counted": g.counted,
+                       "ratio": round(g.ratio_final, 4), "passes": g.passes,
+                       "credited": g.credited, "to_pass": g.to_pass} for g in gaps],
+            "granted_total": sum(g.granted for g in gaps),
+            "credited_total": sum(g.credited for g in gaps)}
+
+
+@app.get("/assessments/{aid}/report", response_class=HTMLResponse)
+def evidence_full_report(aid: int, s: Session = Depends(get_session)):
+    """연구팀 회람본 그대로의 근거 분석 전체 보고서 (히트맵·보완계획·요소별 판정 근거).
+
+    위원 페이지의 「근거 상세」가 여기를 가리키는데 라우트가 없어 404 였다.
+    `/submissions/{sid}/report/evidence` 는 추가 인정이 필요한 단위에 집중한
+    화면으로 따로 만들었고, 확정 포맷은 이 자리에 그대로 둔다.
+    """
+    _need_assessment(s, aid)
+    return HTMLResponse(render_evidence(s, aid))
+
+
+@app.get("/assessments/{aid}/exemption", response_class=HTMLResponse)
+def exemption_report(aid: int, s: Session = Depends(get_session)):
+    """면제 결과 — 제출 뒤 보는 한 장. 무엇이 얼마나 면제됐고 훈련이 얼마나 남았나."""
+    _need_assessment(s, aid)
+    return HTMLResponse(render_exemption(s, aid))
+
+
 @app.get("/assessments/{aid}/reviews", response_model=list[ElementReviewOut])
 def list_reviews(aid: int, s: Session = Depends(get_session)):
     _need_assessment(s, aid)
@@ -502,7 +543,7 @@ def home(s: Session = Depends(get_session)):
     recent = [dict(r) | {"step": STEP_KO.get(r["status"], r["status"])}
               for r in s.execute(text("""
         SELECT sub.id, sub.case_number, sub.target_program_id, sub.status,
-               sub.received_at, p.official_name
+               sub.received_at, sub.track, p.official_name
         FROM submission sub LEFT JOIN catalog_wsd_program p
              ON p.program_id = sub.target_program_id
         ORDER BY sub.received_at DESC LIMIT 5""")).mappings()]
@@ -667,18 +708,50 @@ def time_report(sid: int, s: Session = Depends(get_session)):
                             ORDER BY id DESC LIMIT 1"""), {"i": sid}).scalar()
     if aid is None:
         raise HTTPException(404, "기록 확인 결과가 없습니다. 서류를 먼저 올리세요")
-    return HTMLResponse(render_track_a(s, aid))
+    return HTMLResponse(render_track_a(s, aid, editable=False))
 
 
 @app.get("/submissions/{sid}/report/evidence", response_class=HTMLResponse)
 def evidence_report(sid: int, s: Session = Depends(get_session)):
-    """② 근거 분석 보고서 — 제출 자료에서 무엇이 확인됐나. 읽기 전용."""
-    aid = s.execute(text("""SELECT id FROM assessment
-                            WHERE submission_id=:i AND kind='evidence' AND status='done'
-                            ORDER BY id DESC LIMIT 1"""), {"i": sid}).scalar()
+    """② 근거 분석 보고서 — 제출 자료에서 무엇이 확인됐나. 읽기 전용.
+
+    검증을 3회 안에 통과하지 못한 판정(`manual_review`)도 연다. 산출물은 저장해
+    두는데 보고서만 닫아 두면, 같은 판정을 위원 페이지는 그려 주는데 보고서는
+    404 가 된다.
+
+    고르는 기준은 상태가 아니라 **요소가 실제로 있는가**다. 뒤에 돌린 실행이
+    빈 채로 끝나면 id 만 보고 그것을 집어 「결과가 비어 있습니다」를 내민다 —
+    앞서 나온 멀쩡한 보고서를 덮어 버리는 셈이다.
+    """
+    aid = s.execute(text("""SELECT a.id FROM assessment a
+                            WHERE a.submission_id=:i AND a.kind='evidence'
+                              AND a.status IN ('done', 'manual_review')
+                              AND EXISTS (SELECT 1 FROM assessment_element e
+                                           WHERE e.assessment_id = a.id)
+                            ORDER BY a.id DESC LIMIT 1"""), {"i": sid}).scalar()
     if aid is None:
         raise HTTPException(404, "근거 분석 결과가 없습니다")
-    return HTMLResponse(render_evidence(s, aid))
+    return HTMLResponse(render_evidence_focus(s, sid))
+
+
+@app.post("/submissions/{sid}/evidence/confirm")
+def confirm_evidence(sid: int, s: Session = Depends(get_session)):
+    """② 근거 분석을 「확인했다」고 표시한다.
+
+    ② 는 읽는 자리다 — 눌러서 바뀌는 것이 없으니 상태가 영영 그대로였고,
+    기계 검증을 통과 못 한 건은 「확인 필요」에 머물러 다음으로 넘어가지 못했다.
+    사람이 읽었다는 사실만 남기면 흐름이 ③ 으로 넘어간다.
+
+    감사 기록에 남긴다 — 누가 언제 확인하고 넘어갔는지가 판정의 일부다.
+    """
+    aid = evidence_aid(s, sid)
+    if aid is None:
+        raise HTTPException(409, "확인할 근거 분석 결과가 없습니다")
+    s.execute(text("""INSERT INTO audit_log (entity, entity_id, action, actor, detail)
+                      VALUES ('assessment', :i, 'evidence_confirmed', 'user',
+                              CAST(:d AS jsonb))"""),
+              {"i": str(aid), "d": json.dumps({"submission_id": sid}, ensure_ascii=False)})
+    return RedirectResponse(f"/submissions/{sid}", status_code=303)
 
 
 @app.post("/submissions/{sid}/analyze")

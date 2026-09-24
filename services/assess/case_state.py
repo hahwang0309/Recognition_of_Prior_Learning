@@ -139,6 +139,7 @@ class CaseState:
     # 이미 끝난 근거 분석. 새 실행이 도는 중이라도 지난 보고서는 계속 열려야 한다.
     # 이것을 나누지 않았을 때, 재실행 한 번에 완성된 보고서가 화면에서 사라졌다.
     evidence_done: Run | None
+    evidence_ack: bool                      # ② 를 사람이 읽고 넘어갔나
     n_reviewed: int                         # ③ 전문가 검토 — 판단이 기록된 요소 수
     n_judge: int                            # 사람이 따져야 하는 요소 수
     next_stage: int                         # 다음에 손댈 검토 단계 (1~5)
@@ -322,6 +323,22 @@ def _runs(s: Session, submission_id: int, *, only_done: bool = False) -> dict[st
     return out
 
 
+def _confirmed(s: Session, submission_id: int) -> bool:
+    """② 를 사람이 읽고 넘어갔나.
+
+    「어느 실행을 보나」는 보고서·개요와 **같은 함수**로 판단한다. 각자 고르면
+    갈라진다 — 확인은 요소가 있는 실행에 붙는데 개요는 최신 실행을 보던 탓에,
+    확인을 눌러도 화면이 그대로인 적이 있었다.
+    """
+    from services.review.unit_hours import evidence_aid
+    aid = evidence_aid(s, submission_id)
+    if aid is None:
+        return False
+    return bool(s.execute(text("""SELECT 1 FROM audit_log
+        WHERE entity='assessment' AND action='evidence_confirmed'
+          AND entity_id=:i LIMIT 1"""), {"i": str(aid)}).first())
+
+
 def case_state(s: Session, submission_id: int) -> CaseState | None:
     sub = s.execute(text("""
         SELECT s.id, s.case_number, s.track, s.status, s.received_at,
@@ -408,7 +425,8 @@ def case_state(s: Session, submission_id: int) -> CaseState | None:
         extra_docs=[d for d in docs if not is_time_doc(d["doc_type"])],
         queued_at=queued_at, worker_ok=worker_alive(s),
         time=done_runs.get("time") or runs.get("time"),
-        evidence=ev, evidence_done=ev_done, n_reviewed=n_reviewed,
+        evidence=ev, evidence_done=ev_done,
+        evidence_ack=_confirmed(s, submission_id), n_reviewed=n_reviewed,
         n_judge=n_judge, n_settled=n_settled, judged=judged,
         next_stage=next_stage, stage_line=stage_line, stages=stages, split=split,
         decision=dict(dec) if dec else None,

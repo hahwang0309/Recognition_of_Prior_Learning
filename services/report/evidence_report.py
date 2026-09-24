@@ -26,6 +26,7 @@ from services.report.fids import label as fid_label
 from services.report.fids import listing as fid_listing
 from services.report.fids import meta_of
 from services.report.layout import page
+from services.report._shared import STEP_CSS, step_head
 
 e = lambda x: html.escape(str(x) if x is not None else "")   # noqa: E731
 
@@ -434,14 +435,14 @@ def render_evidence(s: Session, assessment_id: int) -> str:
 
     return f"""<!doctype html><html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>RPL Track B 심사 보고서 — {e(a['case_number'])}</title><style>{CSS}</style></head>
+<title>RPL Track B 심사 보고서 — {e(a['case_number'])}</title><style>{CSS}{STEP_CSS}</style></head>
 <body><div class="wrap">
 <div class="nav"><a href="/submissions/{sid}">← 심사 개요</a>
- <a href="/submissions/{sid}/report/time">Track A 보고서</a>
+ <a href="/submissions/{sid}/report/time">① 기록 확인</a>
  <button onclick="print()">인쇄</button>
- <a class="go" href="/assessments/{a['id']}/review">전문가 검토로</a></div>
+ <a href="/submissions/{sid}/report/evidence">② 근거 분석</a></div>
 
-<h1>RPL Track B 심사 보고서</h1>
+{step_head("evidence", "RPL Track B 심사 보고서")}
 <p class="lead">제출 자료에서 뽑은 근거로 능력단위요소별 인정 여부와 보완 방법을 낸다.</p>
 
 <div class="note"><b>이 문서는 판정이 아니라 판정 근거입니다.</b> 여기 적힌 것은
