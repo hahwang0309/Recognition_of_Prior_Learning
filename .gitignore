@@ -13,3 +13,8 @@ storage/
 
 # 코드 탐색 도구가 만드는 캐시
 .serena/
+
+# 빌드·도구가 만드는 것
+krpl.egg-info/
+.gstack/
+.DS_Store
