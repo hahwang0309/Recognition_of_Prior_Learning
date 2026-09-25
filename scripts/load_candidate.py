@@ -27,6 +27,7 @@ import yaml
 from sqlalchemy import text
 
 from krpl_core.config import get_rubric, get_settings
+from services.assess.case_state import is_time_doc
 from krpl_core.db import session_scope
 from krpl_core.models import Submission
 from services.ingest.service import ingest_submission
@@ -127,7 +128,17 @@ def load(src: Path = SRC, case: str | None = None, program: str | None = None) -
                      {"p": program}).first() is None:
             raise ValueError(f"카탈로그에 없는 종목입니다: {program}")
         s.execute(text("DELETE FROM submission WHERE case_number=:c"), {"c": cn})
-        sub = Submission(case_number=cn, track="B", target_program_id=program,
+        # 접수 구분을 「B」로 박아 두면 안 된다. Track B 는 NCS 이수 기록이 없는
+        # 것이 전제라 기록 확인을 돌리지 않는데, 과정평가형 자격을 낸 사람까지
+        # B 로 받으면 그 기록이 통째로 묻힌다. 화면 접수와 같은 기준으로 —
+        # 보유 자격이 있으면 A — 정하고, 신청서에 적혀 있으면 그것을 따른다.
+        quals0 = [q for q in (apply.get("보유자격") or []) if q]
+        # Track A 의 대상은 「과정평가형 자격 보유자와 NCS 기반 훈련 이수자」다.
+        # 자격만 보면 NCS 민간훈련 이수자가 B 로 떨어져 이수 기록이 통째로 묻힌다.
+        # 어느 문서가 시간 자료인지는 기준서가 정한다(document_types.*.time_source).
+        has_ncs = any(is_time_doc(d.get("doc_type") or "") for d in docs)
+        track = (apply.get("접수구분") or ("A" if (quals0 or has_ncs) else "B")).upper()
+        sub = Submission(case_number=cn, track=track, target_program_id=program,
                          note=apply.get("비고") or None)
         s.add(sub)
         s.flush()
@@ -135,7 +146,7 @@ def load(src: Path = SRC, case: str | None = None, program: str | None = None) -
         # 보유 자격 — 화면 접수(gateway/api.py)와 같게 doc_type='과정평가형자격' 행으로 둔다.
         # 기록 확인(track_a_service)은 이 행의 issuer 로 편성기준 시간을 찾는다.
         # 이 행이 없으면 이수증 실적값만으로 돌아 자격 편성기준 경로가 빠진다(2026-09-23 실측: 45% vs 55%).
-        quals = [q for q in (apply.get("보유자격") or []) if q]
+        quals = quals0
         for q in quals:
             if s.execute(text("SELECT 1 FROM catalog_cbq_qual WHERE qual_id=:q"), {"q": q}).first() is None:
                 raise ValueError(f"편성기준 DB에 없는 자격입니다: {q!r} (신청서.yaml 보유자격은 cbq_qual_id 그대로)")

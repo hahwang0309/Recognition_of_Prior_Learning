@@ -34,6 +34,26 @@ def time_aid():
     return v
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _as_track_a(time_aid):
+    """이 파일은 **Track A 의 시간 인정 흐름**을 본다.
+
+    실사례(R2026-0002)는 접수 구분이 B 라서 그대로 두면 화면이 Track B 경로로
+    갈라진다. 트랙을 A 로 고정하고 끝나면 되돌린다 — Track B 경로는
+    `test_track_b_flow.py` 가 본다.
+    """
+    with session_scope() as s:
+        sid = s.execute(text("SELECT submission_id FROM assessment WHERE id=:a"),
+                        {"a": time_aid}).scalar_one()
+        before = s.execute(text("SELECT track FROM submission WHERE id=:i"),
+                           {"i": sid}).scalar_one()
+        s.execute(text("UPDATE submission SET track='A' WHERE id=:i"), {"i": sid})
+    yield
+    with session_scope() as s:
+        s.execute(text("UPDATE submission SET track=:t WHERE id=:i"),
+                  {"t": before, "i": sid})
+
+
 @pytest.fixture(autouse=True)
 def _clean(time_aid):
     yield

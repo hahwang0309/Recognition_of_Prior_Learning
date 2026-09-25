@@ -65,20 +65,49 @@ def track_chip(track: str | None, *, full: bool = False) -> str:
 # 2단계**인데, 화면에는 확정 포맷 제목 「RPL Track B 심사 보고서」가 떠서 트랙이
 # 바뀐 것처럼 보였다. 제목은 연구팀 회람본이라 못 바꾸므로(docs/formats/README.md)
 # 단계 이름을 제목 **위에** 크게 붙이고 확정 제목은 아래로 내린다.
-STEP = {
+# ── 단계 어휘 ───────────────────────────────────────────────────────
+#
+# 두 트랙은 접수부터 다른 경로이고 거치는 화면도 다르다. Track B 에는 ① 기록
+# 확인이 없다 — 코드가 맞는 이수 기록이 없는 것이 전제이므로 근거 분석이 곧
+# 판정이다. 그래서 단계줄을 트랙별로 따로 둔다.
+#
+#   Track A   ① 기록 확인  ② 근거 분석  ③ 전문가 검토  ④ 최종 판정
+#   Track B   ① 근거 분석  ② 위원 검토  ③ 확인 계획    ④ 최종 판정
+#
+# 확정 보고서 제목(「RPL Track A/B 심사 보고서」)은 트랙별로 그대로 둔다.
+# 단계 이름은 그 위에 얹는다.
+STEP_A = {
     "time":     ("① 기록 확인", "NCS 코드가 맞는 이수시간을 센다"),
     "evidence": ("② 근거 분석", "그 밖의 자료로 추가 인정이 가능한지 본다"),
     "review":   ("③ 전문가 검토", "근거를 보고 추가 인정 시간을 정한다"),
     "final":    ("④ 최종 판정", "인정시간 → 인정 능력단위 → 면제시간"),
 }
+# Track B 는 ③ 확인 계획에서 끝난다. 요소·항목에는 시간이 없어(NCS 원자료 확인)
+# 면제 시간을 여기서 확정하지 않는다 — 확인 계획이 인정·보류·불인정을 보이고 마무리한다.
+STEP_B = {
+    "evidence": ("① 근거 분석", "제출 자료를 능력단위 항목에 배치한다"),
+    "panel":    ("② 위원 검토", "근거를 보고 항목별 인정 여부를 정한다"),
+    "plan":     ("③ 확인 계획", "인정·보류·불인정과 보류 단위의 확인 방법"),
+}
+STEP = STEP_A            # 옛 이름 — Track A 화면이 쓰던 것
+
+ORDER = {"A": ("time", "evidence", "review", "final"),
+         "B": ("evidence", "panel", "plan")}
 
 # 못 가는 단계에 왜 못 가는지 붙인다 — 흐린 글씨만 두면 고장으로 읽힌다.
 STEP_BLOCKED = {
     "time":     "기록 확인 결과가 아직 없습니다",
     "evidence": "근거 분석을 아직 돌리지 않았습니다",
     "review":   "기록 확인이 끝나야 들어갈 수 있습니다",
-    "final":    "기록 확인이 끝나야 들어갈 수 있습니다",
+    "panel":    "근거 분석이 끝나야 들어갈 수 있습니다",
+    "plan":     "위원 검토를 제출해야 만들어집니다",
+    "final":    "판정 결과가 아직 없습니다",
 }
+
+
+def steps_of(track: str | None) -> dict[str, tuple[str, str]]:
+    return STEP_B if (track or "A").upper() == "B" else STEP_A
+
 
 STEP_CSS = """
 .step-h{margin:0 0 2px;font-size:21px;letter-spacing:-.02em}
@@ -100,7 +129,7 @@ a.go:hover,button.go:hover{opacity:.88}
 """
 
 
-def step_head(key: str, confirmed_title: str, *,
+def step_head(key: str, confirmed_title: str, *, track: str = "A",
               nav: dict[str, str | None] | None = None) -> str:
     """단계 이름(크게) + 확정 포맷 제목(작게) + 네 단계 이동줄.
 
@@ -111,16 +140,17 @@ def step_head(key: str, confirmed_title: str, *,
     같은 자리에서 움직일 수 있는 것이 가장 짧은 길이다. 화면마다 다음 단계
     버튼을 따로 두면 위치도 문구도 갈라진다 — 실제로 여섯 가지로 갈라졌다.
     """
-    name, what = STEP[key]
+    steps = steps_of(track)
+    name, what = steps[key]
     out = ""
-    for k in ("time", "evidence", "review", "final"):
-        label = e(STEP[k][0])
+    for k in ORDER[(track or "A").upper()]:
+        label = e(steps[k][0])
         if k == key:
             out += f'<span class="on">{label}</span>'
         elif nav is None:
             out += f'<span>{label}</span>'
         elif nav.get(k):
-            out += f'<a href="{e(nav[k])}" title="{e(STEP[k][1])}">{label}</a>'
+            out += f'<a href="{e(nav[k])}" title="{e(steps[k][1])}">{label}</a>'
         else:
             out += f'<span class="off" title="{e(STEP_BLOCKED[k])}">{label}</span>'
     return (f'<div class="step-nav">{out}</div>'
@@ -128,9 +158,22 @@ def step_head(key: str, confirmed_title: str, *,
             f'<p class="step-src">확정 보고서 포맷: {e(confirmed_title)}</p>')
 
 
-def step_nav(submission_id: int, time_aid: int | None,
-             has_evidence: bool) -> dict[str, str | None]:
-    """네 단계의 주소. 한 곳에서 만든다 — 화면마다 조립하면 또 갈라진다."""
+def step_nav(submission_id: int, time_aid: int | None, has_evidence: bool,
+             *, track: str = "A", ev_aid: int | None = None,
+             has_plan: bool = False) -> dict[str, str | None]:
+    """단계별 주소. 한 곳에서 만든다 — 화면마다 조립하면 또 갈라진다.
+
+    Track B 는 근거 분석 판정(`ev_aid`)을 축으로 돈다. 위원 검토·확인 계획이
+    모두 그 판정에 붙어 있기 때문이다.
+    """
+    if (track or "A").upper() == "B":
+        return {
+            # ① 은 근거 분석 화면 하나뿐이다. 회람본 3장 보고서는 화면에서 걷어냈다
+            # (2026-09-24) — 단계줄이 그것을 가리켜 「옛날 것으로 돌아갔다」가 됐다.
+            "evidence": f"/submissions/{submission_id}/report/evidence" if ev_aid else None,
+            "panel": f"/assessments/{ev_aid}/panel" if ev_aid else None,
+            "plan": f"/assessments/{ev_aid}/plan" if (ev_aid and has_plan) else None,
+        }
     return {
         "time": f"/submissions/{submission_id}/report/time" if time_aid else None,
         "evidence": f"/submissions/{submission_id}/report/evidence" if has_evidence else None,

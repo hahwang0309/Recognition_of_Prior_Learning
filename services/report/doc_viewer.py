@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -58,7 +59,9 @@ def doc_name(path: str | None, key: str) -> str:
     while _PREFIX.match(n):
         n = _PREFIX.sub("", n, count=1)
     n = n.replace("_", " ").strip()
-    return n or key
+    # macOS 파일명은 NFD 다 — 그대로 두면 「수료증」이 「수료증」처럼 자모가 풀려
+    # 보이고 낱말 찾기도 걸리지 않는다. 이름을 만드는 이 자리에서 되돌린다.
+    return unicodedata.normalize("NFC", n) or key
 
 
 def _fno(fid: str) -> int:

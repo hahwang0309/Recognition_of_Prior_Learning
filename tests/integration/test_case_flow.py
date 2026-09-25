@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -128,7 +129,12 @@ def test_case_number_opens_the_overview(client, sid):
 
     h = client.get(f"/submissions/{sid}").text
     assert h.startswith("<!doctype html>") and CASE in h
-    for step in ("기록 확인", "근거 분석", "전문가 검토", "최종 판정"):
+    # 단계 이름은 트랙마다 다르다 — Track B 에는 ① 기록 확인이 없다.
+    with session_scope() as s:
+        track = s.execute(text("SELECT track FROM submission WHERE id=:i"),
+                          {"i": sid}).scalar_one()
+    from services.report._shared import steps_of
+    for step, _ in steps_of(track).values():
         assert step in h, f"개요에 「{step}」 단계가 없다"
 
 
@@ -156,14 +162,15 @@ def test_overview_links_to_both_reports(client, sid):
 
 
 def test_both_reports_render(client, sid):
-    """확정 포맷 전체 보고서는 `/assessments/{aid}/report` 에 있다.
+    """단계 화면 둘이 열린다.
 
-    `/submissions/{sid}/report/evidence` 는 「추가 인정이 필요한 단위를 문서별
-    근거로 본다」에 집중한 화면으로 따로 만들었다(2026-09-24). 회람본 그대로의
-    세 장짜리 보고서는 옮겨 두었고, 여기서 그것을 확인한다.
+    회람본 3장 보고서(`/assessments/{aid}/report`)는 2026-09-24 에 앱에서
+    걷어냈다 — 단계줄이 그것을 가리켜 「옛날 것으로 돌아갔다」가 됐기 때문이다.
+    원본은 `docs/formats/trackB_보고서.html` 에 연구 자료로 남아 있다.
     """
-    t = client.get(f"/submissions/{sid}/report/time")
-    assert t.status_code == 200 and "RPL Track A 심사 보고서" in t.text
+    r = client.get(f"/submissions/{sid}/report/time")
+    assert r.status_code == 200 and "RPL Track A 심사 보고서" in r.text
+
     with session_scope() as s:
         st = case_state(s, sid)
         aid = s.execute(text("""SELECT a.id FROM assessment a
@@ -171,18 +178,14 @@ def test_both_reports_render(client, sid):
               AND a.status IN ('done','manual_review')
               AND EXISTS (SELECT 1 FROM assessment_element e WHERE e.assessment_id=a.id)
             ORDER BY a.id DESC LIMIT 1"""), {"i": sid}).scalar()
+    ev = client.get(f"/submissions/{sid}/report/evidence")
     if aid is None:
-        assert client.get(f"/submissions/{sid}/report/evidence").status_code == 404
-        assert not st.evidence_done           # 아직 볼 것이 없다
+        assert ev.status_code == 404
+        assert not st.evidence_done
         return
-    ev = client.get(f"/assessments/{aid}/report")
-    assert ev.status_code == 200 and "RPL Track B 심사 보고서" in ev.text
-    # 연구팀 확정 포맷의 세 장이 모두 있어야 한다
-    for chap in ("Ⅰ. 히트맵", "Ⅱ. 보완계획", "Ⅲ. 능력단위요소별 판정 근거"):
-        assert chap in ev.text, f"확정 포맷의 「{chap}」 이 빠졌다"
-    # 회람본에서 단계 화면으로 돌아갈 길이 있어야 한다. 이름은 단계 이름으로 쓴다
-    # (예전에는 「전문가 검토로」였는데 같은 곳을 화면마다 다르게 불렀다).
-    assert "② 근거 분석" in ev.text
+    assert ev.status_code == 200 and 'class="hm"' in ev.text, "근거 분석 화면이 아니다"
+    assert client.get(f"/assessments/{aid}/report").status_code == 404, \
+        "걷어낸 화면이 아직 열린다"
 
 
 def test_evidence_report_opens_when_validation_was_exhausted(client, sid):
@@ -241,23 +244,21 @@ def test_reports_agree_on_hours(client, sid):
 
 def test_reports_use_names_not_codes(client, sid):
     """이름은 기준에 있는 값이다. AI 가 받아 적어 준 것에 기대면 코드만 뜬다."""
-    with session_scope() as s:
-        aid = s.execute(text("""SELECT a.id FROM assessment a
-            WHERE a.submission_id=:i AND a.kind='evidence'
-              AND a.status IN ('done','manual_review')
-              AND EXISTS (SELECT 1 FROM assessment_element e WHERE e.assessment_id=a.id)
-            ORDER BY a.id DESC LIMIT 1"""), {"i": sid}).scalar()
-    if aid is None:
+    r = client.get(f"/submissions/{sid}/report/evidence")
+    if r.status_code == 404:
         pytest.skip("근거 분석 결과 없음")
-    h = client.get(f"/assessments/{aid}/report").text
+    h = r.text
+    # 근거 분석 화면의 축은 **능력단위**다(2026-09-24 재설계). 요소 이름은 다음
+    # 단계에서 쓴다. 어느 쪽이든 이름은 기준서 값이어야 하고 코드가 뜨면 안 된다.
     with session_scope() as s:
         names = [r[0] for r in s.execute(text("""
-            SELECT DISTINCT e.element_name FROM catalog_ncs_element e
-            JOIN assessment_element ae ON ae.element_id = e.element_id
-            JOIN assessment a ON a.id = ae.assessment_id
-            WHERE a.submission_id=:i AND a.kind='evidence' LIMIT 5"""), {"i": sid})]
-    assert names, "대조할 요소명을 못 찾음"
-    assert any(n in h for n in names), f"보고서에 요소 이름이 없다: {names}"
+            SELECT DISTINCT COALESCE(w.unit_name, w.unit_code)
+            FROM catalog_wsd_required w JOIN submission sub
+              ON sub.target_program_id = w.program_id
+            WHERE sub.id=:i LIMIT 8"""), {"i": sid})]
+    assert names, "대조할 능력단위명을 못 찾음"
+    assert any(n in h for n in names), f"화면에 능력단위 이름이 없다: {names}"
+    assert not re.search(r">\s*\d{10}\s*<", h), "능력단위 코드가 그대로 보인다"
 
 
 def test_reports_avoid_internal_jargon(client, sid):

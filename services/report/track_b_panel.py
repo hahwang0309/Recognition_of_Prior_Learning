@@ -21,7 +21,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from krpl_core.config import get_rubric
-from services.report._shared import TRACK_CSS, param_table, pending, track_chip, STEP_CSS, step_head
+from services.report._shared import (STEP_CSS, TRACK_CSS, param_table, pending,
+                                     step_head, step_nav, track_chip)
 from services.report.doc_viewer import js_literal
 from services.report.track_a_report import CSS as BASE_CSS
 from services.review.coverage import ADD, Q, S, element_coverage, three_point, unit_by_coverage
@@ -33,6 +34,17 @@ BUCKET_KO = {"인정후보": "인정 후보", "추가확인": "추가 확인", "
 VERDICT_CLS = {"인정": ("good", "●"), "보류": ("hold", "◆"), "불인정": ("crit", "■")}
 BAND_CLS = {"상": "good", "중": "hold", "하": "crit"}
 FIT_CLS = {"직접": "good", "간접": "hold", "부정": "crit"}
+
+
+def fit_class(fit: str) -> str:
+    """적합도 → 색. **어휘 밖의 값도 그린다.**
+
+    AI 가 「간직」처럼 어휘에 없는 값을 낸 적이 있다(판정 820). 기계 검증이
+    `fit_어휘` 로 잡아 재요청했지만 3회 안에 못 고쳐 그대로 저장됐고, 화면이
+    `KeyError` 로 죽어 위원이 아무것도 볼 수 없었다. 자료가 이상해도 화면은
+    떠야 한다 — 이상하다는 것을 눈에 보이게 하면서.
+    """
+    return FIT_CLS.get(fit, "crit")
 
 EXTRA_CSS = """
 .gA,.gB,.gC,.gD,.gE{display:inline-block;width:20px;height:20px;line-height:20px;text-align:center;border-radius:5px;font-size:11px;font-weight:700;color:#fff}
@@ -59,6 +71,11 @@ a.fx{color:var(--tp);text-decoration:underline dotted;text-underline-offset:2px;
 a.fx:hover{color:var(--hold)}
 .fx .gA,.fx .gB,.fx .gC,.fx .gD,.fx .gE{width:16px;height:16px;line-height:16px;font-size:10px;margin-left:3px;vertical-align:1px}
 #dv{position:fixed;top:0;right:0;width:440px;max-width:92vw;height:100vh;background:var(--sf,#fff);border-left:1px solid var(--bd);box-shadow:-6px 0 18px rgba(0,0,0,.08);z-index:50;display:none;flex-direction:column;font-size:12.5px}
+.pbar{height:6px;border-radius:3px;background:var(--s2);overflow:hidden;margin:6px 0 4px;max-width:320px}
+.pbar i{display:block;height:100%;width:38%;border-radius:3px;background:var(--tp);
+ animation:pslide 1.1s ease-in-out infinite}
+@keyframes pslide{0%{margin-left:-38%}100%{margin-left:100%}}
+#subbusy{margin-left:4px}
 #dv.open{display:flex}
 #dv .hd{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--bd)}
 #dv .hd b{flex:1;font-size:13px}
@@ -131,6 +148,10 @@ def render_panel(s: Session, assessment_id: int) -> str:
         LEFT JOIN catalog_wsd_program p ON p.program_id=s.target_program_id
         WHERE a.id=:i"""), {"i": assessment_id}).mappings().one()
     sid = a["submission_id"]
+    time_aid = s.execute(text("""SELECT id FROM assessment WHERE submission_id=:i
+        AND kind='time' ORDER BY id DESC LIMIT 1"""), {"i": sid}).scalar()
+    has_plan = bool(s.execute(text("""SELECT 1 FROM artifact
+        WHERE assessment_id=:a AND stage='plan' LIMIT 1"""), {"a": assessment_id}).first())
     els = [dict(r) for r in s.execute(text("""
         SELECT element_id, recommendation, evidence_level, verification_method, confidence, payload
         FROM assessment_element WHERE assessment_id=:i ORDER BY element_id"""), {"i": assessment_id}).mappings()]
@@ -199,7 +220,7 @@ def render_panel(s: Session, assessment_id: int) -> str:
         els_ko = " · ".join(BUCKET_KO[b] for b in tp["buckets"]) if tp["buckets"] else "요소 없음"
         urows += f"""<tr data-unit="{e(u['code'])}">
  <td class="unit">{e(u['name'])}<small>{u['hours']}h · 요소 {len(u['els'])}개 · AI 참고: {e(els_ko)}</small></td>
- <td><span class="b {BAND_CLS[band]}" id="m-{e(u['code'])}">{band}</span> <small id="mc-{e(u['code'])}">항목 {cov['n_covered']}/{cov['n_total']} 인정 ({cov['ratio']:.0%})</small></td>
+ <td><span class="b {BAND_CLS[band]}" id="m-{e(u['code'])}">{band}</span> <small id="mc-{e(u['code'])}">요소 {cov['n_covered']}/{cov['n_total']} 인정 ({cov['ratio']:.0%})</small></td>
  <td><span class="b {BAND_CLS[tb]}">{tb}</span> <small>{e(tb_note)}</small></td>
  <td><span class="b {BAND_CLS[tp['verify']]}">{tp['verify']}</span> <small>최고 등급 {e(tp['best_grade'] or '없음')}</small></td>
  <td><span class="st {vc}" id="v-{e(u['code'])}"><i>{vi}</i>{u['verdict']}</span></td></tr>"""
@@ -240,7 +261,7 @@ def render_panel(s: Session, assessment_id: int) -> str:
                 src = "".join(
                     f"<div><small><a class='fx' data-fid='{e(ev['fids'][0])}'>{e(_doc_name(doc_by_key.get(ev['fids'][0][:3], {}).get('file_path'), ev['fids'][0][:3]))}"
                     f"<span class='g{e(ev.get('grade') or '')}'>{e(ev.get('grade') or '')}</span></a>"
-                    f"{'' if fit_of(ev) == '직접' else f' <span class=&quot;ft {FIT_CLS[fit_of(ev)]}&quot;>{fit_of(ev)}</span>'}</small>"
+                    f"{'' if fit_of(ev) == '직접' else f' <span class=&quot;ft {fit_class(fit_of(ev))}&quot;>{e(fit_of(ev))}{'' if fit_of(ev) in FIT_CLS else ' ⚠ 알 수 없는 값'}</span>'}</small>"
                     f"<blockquote>{e(ev.get('quote', ''))}</blockquote><small style='color:var(--tm)'>{cite(ev.get('why', ''))}</small></div>"
                     for ev in evs).replace("&quot;", '"')
                 if direct:
@@ -266,7 +287,10 @@ def render_panel(s: Session, assessment_id: int) -> str:
  <td>{e(kind)} {e(ref[2:])} <small>{e(ktxt)}</small></td>
  <td>{body}</td>
  <td class="c" style="white-space:nowrap">{ctl}</td></tr>"""
-            inner += f"""<details class="sub2" {'open' if c_ai else ''}><summary><span class="lv">요소</span><b>{e(ename)}</b> <small>— 항목 <span id="ec-{e(eid)}">{n_cov}</span>/{len(refs)} 인정 (AI {c_ai}/{len(refs)})</small></summary>
+            # 「AI 몇 개」는 지웠다(2026-09-24) — 위원이 볼 것은 **지금 몇 개가 인정돼
+            # 있나**이지, AI 가 처음에 몇 개를 붙였나가 아니다. 그 수가 옆에 있으면
+            # 위원의 판단을 AI 쪽으로 끌어당긴다.
+            inner += f"""<details class="sub2" {'open' if c_ai else ''}><summary><span class="lv">요소</span><b>{e(ename)}</b> <small>— 항목 <span id="ec-{e(eid)}">{n_cov}</span>/{len(refs)} 인정</small></summary>
 <div class="tw"><table class="it"><thead><tr><th style="width:80px">판단</th><th style="width:34%">항목</th><th>근거 (문서 · 원문 · AI 이유)</th><th style="width:120px">위원 수정</th></tr></thead><tbody>{rows}</tbody></table></div></details>"""
             ev_json.append({"eid": eid, "unit": u["code"], "refs": [r for r, _ in refs],
                             "ev": [{"ref": ev.get("ksa_ref"), "fids": ev.get("fids") or []} for ev in (p.get("evidence") or []) if (ev.get("fit") or "직접") == "직접"],
@@ -277,17 +301,42 @@ def render_panel(s: Session, assessment_id: int) -> str:
     r1 = rb.recommendations["R1"]["requires"]
     r6 = rb.rules.get("R6_recency", {})
     params = [
-        ("능력단위 판정", f"인정된 항목 비율(요소 평균) ≥ {hi:.0%} 인정 · ≥ {lo:.0%} 보류 · 미만 불인정. 항목 인정 = AI 가 근거를 붙였고 위원이 빼지 않은 것 + 위원이 직접 인정한 것", "위원 검토 방식(항목 인정 → 단위 인정). AI 권고는 참고", True),
-        ("보류 질문 부동의", "1번(수행 내용을 다루는가) 부동의 → 불인정 · 2·3번 부동의 → 인정 불가(보류까지)", "연구진 제안", True),
-        ("서류 인정 커버리지 하한", f"{r1.get('ksa_coverage_min', 0.5):.0%}", "Track A 인정선과 같은 값 (임시)", pending(rb, "recommendations.R1.requires.ksa_coverage_min")),
-        ("보류 구간(일치성)", f"{lo:.0%} 이상 ~ {hi:.0%} 미만", "2차 TF 제안", pending(rb, "track_a.verdicts.보류")),
-        ("근거 적합도", "직접 → 인정 · 간접 → 불인정(위원 판단) · 부정 → 불인정(판단 불필요)", "2026-09-24 결정", False),
-        ("능력단위 판정", "요소별 인정 항목 비율의 평균 — 50% 이상 인정 · 30% 이상 보류 · 미만 불인정", "2026-09-23 설계(Track A 구간과 같은 값)", True),
-        ("실기 확인", "외부평가에서 확인 (RPL 단계에서는 하지 않음)", "3차 TF", pending(rb, "track_b.practical_to_external")),
-        ("문서 등급", "A 공적 · B 기관 · C 산출물 · D 제3자 · E 본인 (정부인정 사업주자격 A, 미인정 B, 직무능력인정서 A)", "기준서 · 3차 TF", False),
-        ("교육시간/요구시간", "문서에서 읽은 교육시간 ÷ 종목 총 요구시간. 100% 이상 상 · 50% 이상 중 · 미만 하 (교육시간이 없으면 경력 12개월 상 / 6개월 중)", "표시용 추정 — App 본 계산 아님", True),
-        ("최신성", f"{r6.get('years', {}).get('default', 5)}년, 전기·전자·정보통신 {r6.get('years', {}).get('fast_changing', 3)}년", "기준서", pending(rb, "rules.R6_recency")),
+        ("항목을 누가 인정하나",
+         "AI 가 먼저 근거를 붙이고, 위원이 「근거 부적합」으로 빼거나 「위원 인정」으로 더합니다. "
+         "AI 가 정하는 것은 1차이고 마지막은 위원입니다",
+         "3차 TF 이후 협의 — 깎아 가는 방식", False),
+        ("근거 적합도",
+         "직접(그 일을 했다는 것을 그대로 보여 줌) → 인정 · "
+         "간접(관련은 있으나 증명은 못 함) → 인정 안 됨, 위원이 보고 인정할 수 있음 · "
+         "부정(못 한다·안 해봤다는 본인 진술) → 인정 안 됨",
+         "2026-09-24 결정", False),
+        ("요소 인정", f"한 요소 안에서 인정된 항목이 {hi:.0%} 이상이면 그 요소를 인정합니다",
+         "2026-09-24 결정 — Track A 인정선과 같은 값", True),
+        ("능력단위 판정",
+         f"인정된 요소가 {hi:.0%} 이상이면 인정 · {lo:.0%} 이상이면 보류 · 그 미만은 불인정",
+         "2026-09-24 결정 — 예전에는 요소별 비율의 평균이었습니다", True),
+        ("인정되면 몇 시간",
+         "그 능력단위의 요구시간 전체. 요소·항목에는 시간이 매겨져 있지 않아 "
+         "충족 여부로만 판단합니다",
+         "NCS 원자료 확인 · 설계안", False),
+        ("보류 단위는 어떻게",
+         "인정되지 못한 요소만 시험·면접·외부평가로 확인합니다. 이미 인정된 요소는 확인하지 않습니다",
+         "2026-09-24 설계", True),
+        ("실기", "RPL 단계에서는 보지 않고 외부평가에 맡깁니다",
+         "3차 TF", pending(rb, "track_b.practical_to_external")),
+        ("문서 등급",
+         "A 공적 증빙 · B 기관 발급 · C 산출물·기록 · D 제3자 진술 · E 본인 진술 "
+         "(정부인정 사업주자격증과 직무능력인정서는 A)",
+         "증거평가기준 · 3차 TF", False),
+        ("자료의 최신성",
+         f"{r6.get('years', {}).get('default', 5)}년까지 인정 (전기·전자·정보통신은 {r6.get('years', {}).get('fast_changing', 3)}년)",
+         "증거평가기준", pending(rb, "rules.R6_recency")),
+        ("교육시간 / 요구시간",
+         "문서에서 읽은 교육시간을 종목 총 요구시간과 견준 참고값입니다. "
+         "판정에는 쓰지 않습니다",
+         "표시용 — 시간은 Track A 가 셉니다", True),
     ]
+
 
     units_json = [{"code": u["code"], "hours": u["hours"], "els": [x["element_id"] for x in u["els"]]} for u in units]
 
@@ -299,14 +348,18 @@ def render_panel(s: Session, assessment_id: int) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RPL Track B 위원 페이지 — {e(a['case_number'])}</title><style>{BASE_CSS}{EXTRA_CSS}{TRACK_CSS}{STEP_CSS}</style></head>
 <body><div class="viz">
-<div class="bk"><a href="/submissions/{sid}">← 심사 개요</a><a href="/assessments/{assessment_id}/report">근거 상세</a><button onclick="print()">인쇄</button></div>
-{step_head("evidence", "RPL Track B 심사 보고서")}
+<div class="bk"><a href="/submissions/{sid}">← 심사 개요</a><button onclick="print()">인쇄</button></div>
+{step_head("panel", "RPL Track B 심사 보고서", track="B",
+           nav=step_nav(sid, time_aid, True, track="B", ev_aid=assessment_id,
+                        has_plan=has_plan))}
 <p class="sub" style="margin:0 0 10px">이 건의 접수 구분: {track_chip(a['track'], full=True)}
  <span style="margin-left:6px">— 위 제목의 「Track B」는 판정 종류(근거 분석)입니다.</span></p>
 <div style="margin:0 0 10px;display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span id="save"></span>
 <form method="post" action="/assessments/{assessment_id}/panel/submit" id="submit-f" style="margin:0;display:none">
 <button type="submit" class="go">제출 → 확인 계획</button>
-<span class="sub" style="margin-left:8px">{('마지막 제출 ' + e(submitted) + ' · <a href="/assessments/' + str(assessment_id) + '/plan">계획 보기</a>') if submitted else '항목 검토를 마치면 누릅니다'}</span></form></div>
+<span class="sub" style="margin-left:8px">{('마지막 제출 ' + e(submitted) + ' · <a href="/assessments/' + str(assessment_id) + '/plan">계획 보기</a>') if submitted else '항목 검토를 마치면 누릅니다'}</span></form>
+<div id="subbusy" hidden><div class="pbar"><i></i></div>
+ <span class="sub">제출 중 — 판정을 기록하고 <b>확인 계획 문안</b>을 만듭니다. AI 1회, 10~30초 걸립니다. 이 화면을 닫지 마십시오.</span></div></div>
 
 <section class="card">
  <header class="ch">
@@ -333,7 +386,7 @@ def render_panel(s: Session, assessment_id: int) -> str:
  <div class="tw"><table><thead><tr><th>등급</th><th>문서</th><th>종류</th></tr></thead><tbody>{drows}</tbody></table></div></details>
 </section>
 
-<section class="card"><header class="ch"><h2>항목별 인정 여부</h2><p class="sub">능력단위 › 능력단위요소 › 항목(지식·기술·태도) 순서입니다. AI 는 근거마다 적합도를 매깁니다 — <b>직접</b>(그 항목의 수행·보유를 그대로 보여 줌) → 인정, 위원이 「근거 부적합」으로 뺄 수 있음 · <b>간접</b>(관련은 있으나 증명은 못 함) → 불인정, 근거를 보고 위원이 「위원 인정」할 수 있음 · <b>부정</b>(못 한다·안 해봤다는 진술) 또는 근거 없음 → 불인정, 검토란 없음. 요소별 인정 비율의 평균이 50% 이상이면 능력단위 인정, 30% 이상이면 보류, 그 미만이면 불인정이며 위 카드와 표가 즉시 다시 계산됩니다. 문서명이나 인용을 누르면 오른쪽에 원문이 열립니다.</p></header>
+<section class="card"><header class="ch"><h2>항목별 인정 여부(위원 판정 필요)</h2></header>
 {items_html}</section>
 
 <footer>
@@ -412,6 +465,13 @@ def render_panel(s: Session, assessment_id: int) -> str:
  }}
  var canSave = location.protocol.indexOf('http')===0, queue=Promise.resolve();
  if(canSave) $('submit-f').style.display='inline-flex';
+ // 제출은 AI 1회를 부른다(10~30초). 아무 표시가 없으면 「멈췄다·에러났다」로 읽힌다.
+ // 폼은 그대로 보내고 화면만 「도는 중」으로 바꾼다.
+ $('submit-f').addEventListener('submit', function(){{
+   var b=$('submit-f').querySelector('button');
+   b.disabled=true; b.textContent='제출 중…';
+   $('subbusy').hidden=false;
+ }});
  function note(msg, ok){{ $('save').textContent=msg; $('save').style.color= ok?'var(--good)':'var(--crit)'; }}
  function saveEl(eid){{
    var x=byEid[eid]; if(!x) return;

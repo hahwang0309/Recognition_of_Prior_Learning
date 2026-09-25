@@ -17,12 +17,14 @@
 
 보완계획·능력단위요소별 판정 근거·KSA 커버리지·권고(R0~R5) 집계는 싣지 않는다.
 판단에 쓰이는 자리가 따로 있고, 여기 같이 두면 볼 것이 많아 정작 근거를 못 읽는다.
-연구팀 회람본 그대로의 전체 보고서는 `/assessments/{aid}/report` 에 있다.
+연구팀 회람본 원본은 `docs/formats/trackB_보고서.html` 에 문서로 남아 있다.
+앱 화면으로는 더 그리지 않는다 — 단계줄이 옛 화면을 가리키는 사고가 났다.
 """
 from __future__ import annotations
 
 import html
 import json
+from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import text
@@ -32,6 +34,7 @@ from services.report._shared import STEP_CSS, step_head, step_nav
 from services.report.doc_viewer import (VIEWER_CSS, VIEWER_HTML, VIEWER_JS,
                                         js_literal, viewer_data)
 from services.report.track_a_report import CSS
+from services.review.coverage import unit_verdicts
 from services.review.unit_hours import unit_evidence, unit_gaps
 
 e = lambda x: html.escape(str(x) if x is not None else "")   # noqa: E731
@@ -49,6 +52,7 @@ FOCUS_CSS = """
 .hm td.v{color:#fff;font-weight:600}
 .hm td.neg{outline:2px solid var(--crit);outline-offset:-2px}
 .hm td.z{background:transparent;color:transparent}
+.hm td.sum{background:transparent;color:var(--tp);font-weight:700}
 .hm-lg{display:flex;gap:10px;align-items:center;font-size:11.5px;color:var(--tm);margin:10px 0 0}
 .hm-lg i{display:inline-block;width:22px;height:11px;border-radius:3px}
 .doc-c{border:1px solid var(--bd);border-radius:12px;padding:14px 16px;margin:0 0 12px}
@@ -66,6 +70,20 @@ FOCUS_CSS = """
 """
 
 
+@dataclass(frozen=True)
+class _BUnit:
+    """Track B 의 한 줄. 화면이 읽는 이름만 Track A 의 UnitGap 과 맞춘다."""
+    unit_code: str
+    unit_name: str
+    required: int
+    ratio_final: float
+    n_covered: int
+    n_total: int
+    verdict: str
+    completed: int = 0
+    to_pass: int = 0
+
+
 def _cell(n: int, mx: int) -> str:
     """조각 수 → 진하기. 0 은 빈칸으로 둔다 — 없는 것을 굳이 그리지 않는다."""
     if not n:
@@ -77,18 +95,29 @@ def _cell(n: int, mx: int) -> str:
 
 def render_evidence_focus(s: Session, submission_id: int) -> str:
     sub = s.execute(text("""
-        SELECT s.id, s.case_number, s.target_program_id, p.official_name
+        SELECT s.id, s.case_number, s.target_program_id, s.track, p.official_name
         FROM submission s LEFT JOIN catalog_wsd_program p ON p.program_id=s.target_program_id
         WHERE s.id=:i"""), {"i": submission_id}).mappings().one()
     time_aid = s.execute(text("""SELECT id FROM assessment WHERE submission_id=:i
         AND kind='time' ORDER BY id DESC LIMIT 1"""), {"i": submission_id}).scalar()
+    has_plan = bool(s.execute(text("""SELECT 1 FROM artifact a JOIN assessment x ON x.id=a.assessment_id
+        WHERE x.submission_id=:i AND a.stage='plan' LIMIT 1"""), {"i": submission_id}).first())
     ev_aid = s.execute(text("""SELECT a.id FROM assessment a
         WHERE a.submission_id=:i AND a.kind='evidence'
           AND a.status IN ('done','manual_review')
           AND EXISTS (SELECT 1 FROM assessment_element x WHERE x.assessment_id=a.id)
         ORDER BY a.id DESC LIMIT 1"""), {"i": submission_id}).scalar()
 
-    gaps = unit_gaps(s, time_aid) if time_aid else []
+    is_b = (sub["track"] or "A").upper() == "B"
+    if is_b:
+        # Track B 에는 기록 확인이 없다. 「추가 인정이 필요한 단위」는 아직 항목
+        # 근거로 인정되지 않은 단위다 — 위원이 근거를 더 봐야 하는 것들.
+        verds = {u["code"]: u for u in unit_verdicts(s, ev_aid)} if ev_aid else {}
+        gaps = [_BUnit(u["code"], u["name"], u["hours"], u["ratio"],
+                       u["n_covered"], u["n_total"], u["verdict"])
+                for u in verds.values() if u["verdict"] != "인정"]
+    else:
+        gaps = unit_gaps(s, time_aid) if time_aid else []
     by_unit = unit_evidence(s, submission_id, [g.unit_code for g in gaps]) if gaps else {}
     fr_json, dn_json = viewer_data(s, submission_id)
     doc_of = {f["fid"]: f["doc"] for f in fr_json}
@@ -131,10 +160,13 @@ def render_evidence_focus(s: Session, submission_id: int) -> str:
                     if (g.unit_code, d["doc"]) in neg else '<td class="v"')
                 for d in docs)
             tot = sum(grid.get((g.unit_code, d["doc"]), 0) for d in docs)
+            meta = (f'요구 {g.required}h · 요소 {g.n_covered}/{g.n_total} 인정 '
+                    f'({g.ratio_final:.0%}) · {g.verdict}' if is_b else
+                    f'요구 {g.required}h · 이수 {g.completed or 0}h '
+                    f'({g.ratio_final:.0%}) · 인정선까지 +{g.to_pass}h')
             rows += (f'<tr><th class="unit">{e(g.unit_name)}'
-                     f'<small>요구 {g.required}h · 이수 {g.completed or 0}h '
-                     f'({g.ratio_final:.0%}) · 인정선까지 +{g.to_pass}h</small></th>'
-                     f'{cells}<td class="z">{tot}</td></tr>')
+                     f'<small>{meta}</small></th>'
+                     f'{cells}<td class="sum">{tot}</td></tr>')
 
         cards = ""
         for d in docs:
@@ -177,13 +209,15 @@ def render_evidence_focus(s: Session, submission_id: int) -> str:
 <div class="bk"><a href="/submissions/{submission_id}">← 심사 개요</a>
  <button onclick="print()">인쇄</button></div>
 
-{step_head("evidence", "RPL Track B 심사 보고서",
-           nav=step_nav(submission_id, time_aid, ev_aid is not None))}
+{step_head("evidence", "RPL Track B 심사 보고서" if is_b else "RPL Track A 심사 보고서",
+           track=sub['track'] or 'A',
+           nav=step_nav(submission_id, time_aid, ev_aid is not None,
+                        track=sub['track'] or 'A', ev_aid=ev_aid, has_plan=has_plan))}
 <p class="sub" style="margin:0 0 16px">{e(sub['case_number'])} ·
  {e(sub['official_name'] or sub['target_program_id'])} ·
  추가 인정이 필요한 단위 <b>{len(gaps)}개</b> · 근거 <b>{n_ev}건</b> ·
  제출 문서 <b>{len(docs)}건</b>
- {f' · <a href="/assessments/{ev_aid}/report">회람본 전체 보고서</a>' if ev_aid else ''}</p>
+</p>
 
 {body}
 

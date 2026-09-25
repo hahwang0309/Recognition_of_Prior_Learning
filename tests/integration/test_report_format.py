@@ -14,7 +14,7 @@ import pytest
 from sqlalchemy import text
 
 from krpl_core.db import session_scope
-from services.report import render_evidence, render_track_a
+from services.report import render_track_a
 
 FORMATS = Path(__file__).resolve().parents[2] / "docs/formats"
 CASE = "R2026-0002"
@@ -40,7 +40,9 @@ def _origin(name: str) -> str:
     return p.read_text(encoding="utf-8")
 
 
-def _rendered(kind: str) -> str:
+def _rendered(kind: str = "time") -> str:
+    """확정 포맷과 대조할 화면. 지금은 기록 확인 보고서뿐이다 —
+    Track B 회람본 보고서는 2026-09-24 에 앱에서 걷어냈다."""
     with session_scope() as s:
         aid = s.execute(text("""
             SELECT a.id FROM assessment a JOIN submission s ON s.id=a.submission_id
@@ -48,7 +50,7 @@ def _rendered(kind: str) -> str:
             ORDER BY a.id DESC LIMIT 1"""), {"c": CASE, "k": kind}).scalar()
         if aid is None:
             pytest.skip(f"{kind} 판정 없음")
-        return render_track_a(s, aid) if kind == "time" else render_evidence(s, aid)
+        return render_track_a(s, aid)
 
 
 # 원본과 구현 양쪽에 다 있어야 하는 구조.
@@ -106,7 +108,8 @@ def test_track_a_keeps_confirmed_markup(name):
 PANEL = {
     "카드 3장": re.compile(r'id="k-rec".*id="k-hold".*id="k-rej"', re.S),
     "3점표": '<table class="tp">',
-    "항목별 인정 여부": "<h2>항목별 인정 여부</h2>",   # 위원 판정 라디오는 2026-09-23 뺐다
+    # 긴 설명 문단은 2026-09-24 뺐다 — 제목이 할 일을 말한다.
+    "항목별 인정 여부": "<h2>항목별 인정 여부(위원 판정 필요)</h2>",
     "파라미터 표": "판정 파라미터 — 위원 논의로 수정 가능",
     "문서 열람창": 'id="dv"',
     "방법론 코드 없음": None,
@@ -133,32 +136,13 @@ def test_track_b_panel_has_the_agreed_sections(name):
         assert _has(h, pat), f"위원 페이지에 「{name}」 이 없다"
 
 
-@pytest.mark.parametrize("name", sorted(TRACK_B))
-def test_track_b_keeps_confirmed_markup(name):
-    pat = TRACK_B[name]
-    origin, mine = _origin("trackB_보고서.html"), _rendered("evidence")
-    assert _has(origin, pat), f"원본에 「{name}」 이 없다 — 시험 쪽이 틀렸다"
-    assert _has(mine, pat), f"구현이 확정 포맷의 「{name}」 을 잃었다"
-
-
-def test_track_b_has_three_chapters():
-    h = _rendered("evidence")
-    for chap in ("Ⅰ. 히트맵", "Ⅱ. 보완계획", "Ⅲ. 능력단위요소별 판정 근거"):
-        assert chap in h, f"확정 포맷의 「{chap}」 이 빠졌다"
-
-
-def test_heatmap_rows_run_high_to_low():
-    """세로축은 요소 번호가 큰 것부터다. 원본이 그렇게 읽히도록 짜여 있다."""
-    h = _rendered("evidence")
-    nos = [int(n) for n in re.findall(r'<th class="rl">요소 (\d+)</th>', h)]
-    assert nos and nos == sorted(nos, reverse=True), f"행 순서가 어긋남: {nos}"
-
-
-def test_heatmap_columns_run_by_hours():
-    """가로축은 요구시간이 큰 능력단위부터. 시간이 큰 쪽 판단이 더 크게 걸린다."""
-    h = _rendered("evidence")
-    hrs = [int(x) for x in re.findall(r'<div class="uh">(\d+)h</div>', h)]
-    assert hrs and hrs == sorted(hrs, reverse=True), f"열 순서가 어긋남: {hrs}"
+# Track B 회람본 보고서(Ⅰ 히트맵·Ⅱ 보완계획·Ⅲ 요소별 판정 근거)를 원본과 대조하던
+# 시험 넷은 뺐다 — 그 화면을 2026-09-24 에 앱에서 걷어냈기 때문이다. 단계줄이 옛
+# 화면을 가리켜 「옛날 것으로 돌아갔다」가 된 뒤의 결정이다.
+#
+# 원본 `docs/formats/trackB_보고서.html` 은 연구 자료로 그대로 남아 있고, 위원
+# 페이지가 확정 포맷을 지키는지는 위의 test_track_b_panel_has_the_agreed_sections
+# 가 계속 본다.
 
 
 def test_track_a_scale_is_shared_across_rows():

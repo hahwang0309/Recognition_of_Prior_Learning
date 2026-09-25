@@ -139,22 +139,110 @@ def element_ratio(element_id: str, payload: dict[str, Any], excluded: Iterable[s
     return element_coverage(payload, set(excluded or ()))[2], False
 
 
+def element_verdict(payload: dict[str, Any], excluded: Iterable[str] = (),
+                    all_refs: Iterable[str] | None = None,
+                    rubric=None) -> tuple[bool, int, int, float]:
+    """요소 판정 — (인정 여부, 인정 항목, 전체 항목, 비율). **이분법이다.**
+
+    항목이 요소의 50% 이상 인정되면 그 요소 **전체**를 인정한다. 요소·항목에는
+    시간이 없으므로(NCS 원자료 확인) 시간으로 환산할 길이 없고, 설계안도
+    「시간 대신 능력단위요소 충족 여부」로 적고 있다.
+    """
+    from krpl_core.config import get_rubric
+    rb = rubric or get_rubric()
+    hi = rb.training_hours.get("adjustment_floor", 0.5)
+    cov, tot, ratio = element_coverage(payload, excluded, all_refs)
+    return (bool(tot) and ratio >= hi), cov, tot, ratio
+
+
 def unit_by_coverage(elements: list[tuple[str, dict[str, Any]]], rubric, excluded: Iterable[str] = (),
                      refs_of: dict[str, Iterable[str]] | None = None) -> dict[str, Any]:
-    """능력단위 판정을 **인정된 항목**으로 낸다 (2026-09-23, 위원 검토 방식).
+    """능력단위 판정 — **두 단계 게이트** (2026-09-24).
 
-    elements: [(element_id, payload)]. 항목 인정 = AI 가 근거를 붙였고 위원이 빼지 않은 것 + 위원이 직접 인정한 것.
-    요소 커버리지 평균이 adjustment_floor(50%) 이상 → 인정, hold_floor(30%) 이상 → 보류, 그 밖 → 불인정.
-    위원의 3점 척도·질문 답("s:", "q:")은 기록만 하고 판정에 쓰지 않는다(3차 TF: 방식은 4차에서 결정).
-    AI 권고(R0~R5)는 쓰지 않는다.
+        ① 요소: 항목 인정 비율 ≥ 50%  →  그 요소 전체 인정
+        ② 단위: 인정 요소 비율 ≥ 50%  →  인정 · ≥ 30% → 보류 · 미만 → 불인정
+
+    항목 인정 = AI 가 **직접** 근거를 붙였고 위원이 빼지 않은 것 + 위원이 직접 인정한 것.
+    위원의 3점 척도·질문 답("s:", "q:")은 기록만 하고 판정에 쓰지 않는다.
+
+    예전에는 요소별 비율의 **평균**으로 단위를 판정했다. 항목이 3개인 요소와 20개인
+    요소가 같은 무게를 가져 적은 쪽이 과대 반영됐다(4차 자료 표 9 #3).
+
+    `n_covered`·`n_total` 은 이제 **요소 수**다 — 화면도 그렇게 읽어야 한다.
     """
     th = rubric.training_hours
     hi, lo = th.get("adjustment_floor", 0.5), th.get("hold_floor", 0.3)
     # excluded 는 요소별 dict(eid → 표시 목록) 또는 모든 요소에 같이 적용할 목록.
     # 위원의 「직접 인정」(add:)은 요소마다 다르므로 dict 로 주는 것이 맞다 — 목록으로 주면 다른 요소로 새어 나간다.
     ex_of = excluded if isinstance(excluded, dict) else {eid: list(excluded or ()) for eid, _ in elements}
-    rs = [element_coverage(p, ex_of.get(eid, ()), (refs_of or {}).get(eid)) for eid, p in elements]
-    n_cov, n_tot = sum(r[0] for r in rs), sum(r[1] for r in rs)
-    ratio = sum(r[2] for r in rs) / len(rs) if rs else 0.0
-    verdict = "인정" if rs and ratio >= hi else "보류" if ratio >= lo else "불인정"
+    oks = [element_verdict(p, ex_of.get(eid, ()), (refs_of or {}).get(eid), rubric)[0]
+           for eid, p in elements]
+    n_cov, n_tot = sum(1 for x in oks if x), len(oks)
+    ratio = n_cov / n_tot if n_tot else 0.0
+    verdict = "인정" if n_tot and ratio >= hi else "보류" if ratio >= lo else "불인정"
     return {"ratio": ratio, "verdict": verdict, "n_covered": n_cov, "n_total": n_tot}
+
+
+def unit_verdicts(s, assessment_id: int) -> list[dict[str, Any]]:
+    """근거 분석 판정 하나의 **능력단위별 판정**. 위원 검토 반영분까지.
+
+    위원 페이지가 화면 안에서 세던 것을 꺼냈다. 면제 결과도 같은 값을 써야
+    하는데, 각자 세면 두 화면이 다른 시간을 말한다 — 실제로 그런 일이 네 군데
+    있었다(README). 화면을 그리는 데 필요한 부속(문서·조각·시간축)은 빼고
+    판정에 필요한 것만 낸다.
+
+    돌려주는 것: [{code, name, hours, verdict, ratio, n_covered, n_total}]
+    """
+    from collections import defaultdict
+    from sqlalchemy import text
+    from krpl_core.config import get_rubric
+
+    rb = get_rubric()
+    prog = s.execute(text("""SELECT sub.target_program_id FROM assessment a
+        JOIN submission sub ON sub.id = a.submission_id WHERE a.id=:i"""),
+        {"i": assessment_id}).scalar()
+    units_req = {r[0]: (r[1], r[2]) for r in s.execute(text("""
+        SELECT unit_code, COALESCE(unit_name, unit_code), required_hours
+        FROM catalog_wsd_required WHERE program_id=:p"""), {"p": prog})}
+    if not units_req:
+        return []
+
+    els = [dict(r) for r in s.execute(text("""
+        SELECT element_id, payload FROM assessment_element WHERE assessment_id=:i"""),
+        {"i": assessment_id}).mappings()]
+    reviews = {r[0]: {"excluded_evidence": r[1]} for r in s.execute(text("""
+        SELECT element_id, excluded_evidence FROM element_review WHERE assessment_id=:i"""),
+        {"i": assessment_id})}
+
+    # 항목 전체 — 같은 항목이 수행준거마다 반복되므로 한 번만 센다.
+    ksa_all: dict[tuple, list[str]] = defaultdict(list)
+    seen: set[tuple] = set()
+    for r in s.execute(text("""
+        SELECT unit_code, element_no, ksa_type, ksa_no FROM catalog_ncs_ksa
+        WHERE unit_code = ANY(:u) ORDER BY unit_code, element_no, ksa_type, ksa_no, pc_no"""),
+        {"u": list(units_req)}):
+        k = (r[0], r[1], f"{r[2]}{r[3]}")
+        if k in seen:
+            continue
+        seen.add(k)
+        ksa_all[(r[0], r[1])].append(k[2])
+
+    def _eno(eid: str) -> int:
+        try:
+            return int(eid.rsplit(".", 1)[1])
+        except (IndexError, ValueError):
+            return 0
+
+    by_unit: dict[str, list[dict]] = defaultdict(list)
+    for x in els:
+        by_unit[x["element_id"].split("_", 1)[0]].append(x)
+
+    out = []
+    for uc, (uname, req) in units_req.items():
+        xs = by_unit.get(uc, [])
+        marks_of = {x["element_id"]: list((reviews.get(x["element_id"]) or {}).get("excluded_evidence") or [])
+                    for x in xs}
+        refs_of = {x["element_id"]: ksa_all.get((uc, _eno(x["element_id"])), []) for x in xs}
+        cov = unit_by_coverage([(x["element_id"], x["payload"]) for x in xs], rb, marks_of, refs_of)
+        out.append({"code": uc, "name": uname, "hours": req, **cov})
+    return out

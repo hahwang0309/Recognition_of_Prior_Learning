@@ -172,6 +172,14 @@ class ElementReviewOut(BaseModel):
     agrees_with_ai: bool
 
 
+class RemoveIn(BaseModel):
+    """접수 건 삭제. `confirm` 에 심사번호를 그대로 적어야 지워진다 —
+    목록에서 잘못 누른 한 번으로 사라지면 안 된다."""
+    confirm: str
+    purge_audit: bool = False
+    actor: str | None = None
+
+
 class UnitHoursIn(BaseModel):
     """능력단위별 추가 인정 시간. `{능력단위코드: 시간}`.
 

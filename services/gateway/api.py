@@ -21,7 +21,7 @@ from datetime import datetime
 from services.assess.case_state import case_state
 from services.report import (
     env_label, render_artifact, render_audit_case, render_audit_list,
-    render_case, render_dashboard, render_evidence, render_home, render_new, render_panel, render_plan,
+    render_case, render_dashboard, render_home, render_new, render_panel, render_plan,
     render_review, render_stage, render_stats, render_track_a, render_upload,
 )
 from services.review import (
@@ -30,6 +30,7 @@ from services.review import (
 )
 from services.review.plan import submit as plan_submit
 from services.review.unit_hours import evidence_aid, save_unit_hours, unit_gaps
+from services.review.remove import remove as remove_case
 from services.report.exemption import render_exemption
 from services.report.evidence_focus import render_evidence_focus
 from services.review import close as review_close
@@ -39,7 +40,7 @@ from services.gateway.schemas import (
     DecisionOut,
     ElementOut, ElementReviewIn, ElementReviewOut, FragmentOut, IngestOut,
     IngestRequest, ProgramOut, RecommendOut, ReviewSummaryOut, SubmissionCreate,
-    GuessIn, GuessOut, UnitHoursIn,
+    GuessIn, GuessOut, RemoveIn, UnitHoursIn,
     RemediationIn, RemediationOut,
     SubmissionOut, TrackBAssessmentOut, TrackBElementOut, ValidationAttemptOut,
 )
@@ -382,22 +383,16 @@ def save_unit_credit(aid: int, body: UnitHoursIn, s: Session = Depends(get_sessi
             "credited_total": sum(g.credited for g in gaps)}
 
 
-@app.get("/assessments/{aid}/report", response_class=HTMLResponse)
-def evidence_full_report(aid: int, s: Session = Depends(get_session)):
-    """연구팀 회람본 그대로의 근거 분석 전체 보고서 (히트맵·보완계획·요소별 판정 근거).
-
-    위원 페이지의 「근거 상세」가 여기를 가리키는데 라우트가 없어 404 였다.
-    `/submissions/{sid}/report/evidence` 는 추가 인정이 필요한 단위에 집중한
-    화면으로 따로 만들었고, 확정 포맷은 이 자리에 그대로 둔다.
-    """
-    _need_assessment(s, aid)
-    return HTMLResponse(render_evidence(s, aid))
-
-
 @app.get("/assessments/{aid}/exemption", response_class=HTMLResponse)
 def exemption_report(aid: int, s: Session = Depends(get_session)):
     """면제 결과 — 제출 뒤 보는 한 장. 무엇이 얼마나 면제됐고 훈련이 얼마나 남았나."""
     _need_assessment(s, aid)
+    # Track B 는 ③ 확인 계획에서 끝난다 — 면제 결과는 그 흐름에 없다.
+    # 라우트만 남겨 두면 500 으로 죽는다(단계 어휘에 'final' 이 없다).
+    track = s.execute(text("""SELECT sub.track FROM assessment a
+        JOIN submission sub ON sub.id = a.submission_id WHERE a.id=:i"""), {"i": aid}).scalar()
+    if (track or "A").upper() == "B":
+        raise HTTPException(404, "Track B 는 확인 계획에서 끝납니다 — 면제 결과 화면이 없습니다")
     return HTMLResponse(render_exemption(s, aid))
 
 
@@ -751,7 +746,27 @@ def confirm_evidence(sid: int, s: Session = Depends(get_session)):
                       VALUES ('assessment', :i, 'evidence_confirmed', 'user',
                               CAST(:d AS jsonb))"""),
               {"i": str(aid), "d": json.dumps({"submission_id": sid}, ensure_ascii=False)})
+    # 「확인 필요」는 기계 검증을 통과 못 했으니 사람이 보라는 뜻이다. 사람이 보고
+    # 넘어갔으면 그 상태에서 내려와야 한다 — 안 그러면 할 일 목록에 영영 남는다.
+    s.execute(text("""UPDATE submission SET status='assessed'
+                      WHERE id=:i AND status='needs_review'"""), {"i": sid})
     return RedirectResponse(f"/submissions/{sid}", status_code=303)
+
+
+@app.post("/submissions/{sid}/remove")
+def remove_submission(sid: int, body: RemoveIn, s: Session = Depends(get_session)):
+    """접수 건을 지운다 — 되돌릴 수 없다.
+
+    화면에서 온 요청이므로 끝나면 접수 현황으로 돌려보낸다. 지운 사실과 무엇이
+    있었는지는 `audit_log` 에 남는다(그 표에는 외래키가 없어 살아남는다).
+    """
+    try:
+        out = remove_case(s, sid, body.confirm, body.purge_audit, body.actor)
+    except LookupError as ex:
+        raise HTTPException(404, str(ex)) from ex
+    except ValueError as ex:
+        raise HTTPException(409, str(ex)) from ex
+    return out
 
 
 @app.post("/submissions/{sid}/analyze")

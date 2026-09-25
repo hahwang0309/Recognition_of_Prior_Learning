@@ -159,9 +159,15 @@ def ingest_submission(s: Session, submission_id: int, documents: list[dict]) -> 
 
     # 기록 확인는 결정론이고 초 단위로 끝난다. 사람이 시작 버튼을 누를 이유가 없다.
     # 여기서 실패해도 수집 자체는 유효하므로 접수를 통째로 되돌리지는 않는다.
+    # 기록 확인은 Track A 만 돈다. Track B 는 NCS 이수 기록이 없는 것이 전제라
+    # 돌려 봐야 전 단위 「미이수」가 나오고, 그것이 화면에서 「기록 확인 완료」로
+    # 보여 오히려 흐름을 헷갈리게 한다.
+    track = (s.execute(text("SELECT track FROM submission WHERE id=:i"),
+                       {"i": submission_id}).scalar() or "A").upper()
     try:
-        from services.assess.track_a_service import run_track_a
-        run_track_a(s, submission_id)
+        if track != "B":
+            from services.assess.track_a_service import run_track_a
+            run_track_a(s, submission_id)
     except Exception:                                    # noqa: BLE001
         log.warning("기록 확인 자동 실행 실패 submission=%s", submission_id, exc_info=True)
     return res

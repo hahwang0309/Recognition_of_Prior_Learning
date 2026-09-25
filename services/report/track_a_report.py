@@ -381,19 +381,29 @@ def render_track_a(s: Session, assessment_id: int, *, editable: bool = True) -> 
         return "TF 결정 필요" if pending else "현행 규칙"
     hold_pending = "track_a.verdicts.보류" in pend
     params = [
-        ("인정선", f"이수시간 ≥ 요구시간의 {th['adjustment_floor']:.0%}",
-         "선이수인정 운영매뉴얼 · 고시 「−50% 조정 가능」", _st(False)),
-        ("인정 시간", "그 단위 요구시간 전체 (이수시간이 아님)", "운영매뉴얼 · 2차 TF 확인", _st(False)),
-        ("보류 구간", f"요구시간의 {th.get('hold_floor', 0.30):.0%} 이상 ~ {th['adjustment_floor']:.0%} 미만",
-         "2차 TF 제안 (대안: 자격 단위 인정)", _st(hold_pending)),
-        ("불인정", f"{th.get('hold_floor', 0.30):.0%} 미만 또는 코드 불일치", "2차 TF 제안", _st(hold_pending)),
-        ("보류 시 추가 증빙", " · ".join(rb_ta.get("hold_evidence") or []),
+        ("인정선", f"이수시간이 그 능력단위 요구시간의 {th['adjustment_floor']:.0%} 이상이면 인정",
+         "선이수인정 운영매뉴얼 · 고시 「−50%까지 조정 가능」", _st(False)),
+        ("인정되면 몇 시간", "그 능력단위의 요구시간 전체 (이수한 시간이 아닙니다)",
+         "운영매뉴얼 · 2차 TF 확인", _st(False)),
+        ("보류 구간",
+         f"이수시간이 요구시간의 {th.get('hold_floor', 0.30):.0%} 이상 {th['adjustment_floor']:.0%} 미만",
+         "2차 TF 제안 (대안: 국가검정 자격은 시간과 무관하게 인정)", _st(hold_pending)),
+        ("불인정", f"{th.get('hold_floor', 0.30):.0%} 미만이거나 능력단위가 서로 다름", "2차 TF 제안", _st(hold_pending)),
+        ("위원이 시간을 더 인정",
+         f"인정선에 못 미친 단위는, 제출 자료를 보고 위원이 시간을 더 인정할 수 있습니다. "
+         f"이수시간과 합해 요구시간의 {th['adjustment_floor']:.0%}를 넘으면 그 단위 요구시간 전체가 면제됩니다",
+         "2026-09-24 설계 — 근거 분석 결과를 시간으로 잇는 자리", _st(True)),
+        ("보류일 때 더 낼 수 있는 것", " · ".join(rb_ta.get("hold_evidence") or []),
          "2차 TF (학습경험기술서·현장교사 확인서·작업일지)", _st(True)),
-        ("이수시간", "자격 편성기준에 적힌 시간(기준값)과 이수증에 적힌 시간(실적값)이 둘 다 있으면 큰 쪽",
-         "App 설계 — 자격을 땄으면 편성기준만큼 배운 것으로 본다", _st(True)),
-        ("추정 표시", f"이수증 없이 기준값으로 판정한 단위는, 기관이 편성기준의 최소({rng.get('min', 0.8):.0%})로 편성했어도 같은 판정인지 확인. 다르면 「추정」— 이수증 요구 (이 건 {warn_n}건)",
+        ("이수시간을 어디서 읽나",
+         "자격 편성기준에 적힌 시간과 이수증에 적힌 시간이 둘 다 있으면 큰 쪽",
+         "연구진 설계 — 자격을 땄으면 편성기준만큼 배운 것으로 봅니다", _st(True)),
+        ("「추정」이 붙는 이유",
+         f"이수증 없이 편성기준 시간으로 판정한 단위는, 기관이 최소({rng.get('min', 0.8):.0%})로 편성했어도 "
+         f"같은 판정인지 다시 계산합니다. 달라지면 「추정」으로 두고 이수증을 받습니다 (이 건 {warn_n}건)",
          "과정평가형 편성 허용범위 {0:.0%}~{1:.0%}".format(rng.get('min', 0.8), rng.get('max', 1.5)), _st(False)),
     ]
+
     fr_js = js_literal(fr_json)
     dn_js = js_literal(dn_json)
 
