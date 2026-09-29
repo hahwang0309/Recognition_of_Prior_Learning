@@ -112,7 +112,8 @@ def _gauge(st: CaseState, b_units: list | None = None) -> str:
         return (f'<div class="line">근거로 인정된 시간 <b>{yes}</b>시간'
                 f' <span class="dim">/ {st.total_hours}시간 ({yes / tot:.0%})</span>'
                 f'{f" · 보류 <b>{hold}</b>시간" if hold else ""}'
-                f' · 남은 훈련 <b>{st.total_hours - yes}</b>시간</div>')
+                f' · 남은 훈련 <b>{st.total_hours - yes - hold}</b>시간'
+                f'{" (보류 별도)" if hold else ""}</div>')
     sp = st.split
     if sp is None:
         # 아직 검토 전 — 기록 확인이 남긴 것만 말할 수 있다.

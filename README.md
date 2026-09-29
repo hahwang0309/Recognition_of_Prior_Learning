@@ -17,6 +17,41 @@ cp .env.example .env         # 비밀값·환경별 값. 아래 설명 참고
 ./scripts/dev.sh api         # http://localhost:8000/audit
 ```
 
+### 앱 구동 — 매일 켜고 끄는 법 (2026-09-28)
+
+위 「빠른 시작」은 처음 한 번(설치·표 생성·카탈로그 적재)이고, 그 뒤로는 이 셋이면 된다.
+모든 명령은 `App/` 디렉터리에서 실행한다.
+
+| 순서 | 명령 | 확인 |
+|---|---|---|
+| ① DB 켜기 | `./scripts/dev.sh db` | `accepting connections` 가 찍힘 (Homebrew PostgreSQL 15, 포트 5432) |
+| ② API 켜기 | `./scripts/dev.sh api` (API만) 또는 `./scripts/dev.sh up` (API + 판정 워커) | http://localhost:8000/health 가 `{"status":"ok", ...}` |
+| ③ 화면 열기 | http://localhost:8000/cases | 접수 현황 — 사례마다 「다음 할 일」 버튼 |
+
+- **어느 쪽을 켜나.** 접수·판정을 터미널 스크립트(`load_candidate.py`·`assess.py`)로 돌리고 위원 페이지만 보려면 `api` 로 충분하다.
+  화면의 「판정 시작」 버튼(`POST /submissions/{sid}/assess`)까지 쓰려면 워커가 있어야 하므로 `up` 을 쓴다.
+- **끄기.** 터미널에서 `Ctrl+C`. DB 는 `pg_ctl -D /opt/homebrew/var/postgresql@15 stop` (켜 둬도 무방).
+- **Claude Code 에서 띄울 때.** `.claude/launch.json` 의 `krpl-api` 구성(포트 8000, `--reload` 없음)을 쓴다.
+  코드를 고쳤으면 서버를 **껐다 다시 켜야** 반영된다 — `dev.sh api` 는 `--reload` 라 자동 반영된다.
+- **화면 주소.**
+
+| 주소 | 무엇 |
+|---|---|
+| `/cases` | 접수 현황(시작점). 진행 막대는 `/cases/progress.json` 을 긁는다 |
+| `/submissions/{sid}` | 심사 개요 — 단계줄·인정 시간 막대·다음 단계 링크 |
+| `/assessments/{aid}/review` | Track A 위원 페이지(기록 확인 결과 + 위원 추가 인정 시간) |
+| `/assessments/{aid}/panel` | Track B 위원 페이지(항목별 인정·근거 부적합 체크, 문서 열람창) |
+| `/assessments/{aid}/plan` | Track B 확인 계획(「제출」 뒤 생성) |
+| `/assessments/{aid}/exemption` | Track A 면제 결과(최종 판정) |
+| `/audit`, `/audit/{case}` | 감사 산출물(단계별 입력·출력·해시) |
+| `/stats` | 실행 비용·시간 통계 |
+
+- **처음 설치.** Python ≥ 3.12 로 `python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"` (의존성은 `pyproject.toml`),
+  `cp .env.example .env` 에 `KRPL_DATABASE_URL`·`ANTHROPIC_API_KEY` 를 넣고 위 「빠른 시작」의 `migrate` → `seed` 순서로 한 번 돌린다.
+  키를 비우면 실제 호출 없이 `replay` 로 돈다. 시험은 `./scripts/dev.sh test` (DB `krpl_test` 를 따로 쓴다).
+- **안 될 때.** `./scripts/dev.sh env` 로 반영된 설정을 본다. 포트 8000 이 이미 쓰이면 `lsof -i :8000` 으로 이전 서버를 찾아 끈다.
+  DB 가 안 뜨면 `/tmp/pg15.log` 를 본다.
+
 ### 위원 심사 한 건 돌리기 (4·5차 집담회 흐름, 2026-09-24 기준)
 
 ```bash

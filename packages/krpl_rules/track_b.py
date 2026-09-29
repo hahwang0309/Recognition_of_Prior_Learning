@@ -158,7 +158,9 @@ def validate_track_b(package: dict, out: dict, rubric) -> ValidationReport:
         ev_grades: set[str] = set()
         for ev in el.get("evidence") or []:
             rep.n_evidence += 1
-            if ev.get("ksa_ref") not in M["refs"]:
+            # 모델이 ksa_ref 를 목록으로 돌려준 적이 있다(A1 R2026-9101, 2026-09-28) — set 조회에서
+            # TypeError 로 판정 전체가 죽었다. 문자열이 아니면 「없음」 오류로 다루고 다시 요청한다.
+            if not isinstance(ev.get("ksa_ref"), str) or ev.get("ksa_ref") not in M["refs"]:
                 add("ksa_ref_없음", eid, repr(ev.get("ksa_ref")))
             else:
                 seen.add(ev["ksa_ref"])

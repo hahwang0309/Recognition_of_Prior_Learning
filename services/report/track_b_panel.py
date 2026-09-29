@@ -231,7 +231,7 @@ def render_panel(s: Session, assessment_id: int) -> str:
     for u in units:
         vc, vi = VERDICT_CLS[u["verdict"]]
         cov = u["cov"]
-        head = (f"<span class='lv'>능력단위</span><b>{e(u['name'])}</b> — {u['hours']}h · 항목 <span id='h-{e(u['code'])}'>{cov['n_covered']}/{cov['n_total']}</span> 인정 · "
+        head = (f"<span class='lv'>능력단위</span><b>{e(u['name'])}</b> — {u['hours']}h · 요소 <span id='h-{e(u['code'])}'>{cov['n_covered']}/{cov['n_total']}</span> 인정 · "
                 f"<span class='st {vc}' id='hv-{e(u['code'])}' style='display:inline-flex'><i>{vi}</i>{u['verdict']}</span>")
         inner = ""
         for x in u["els"]:
@@ -438,11 +438,13 @@ def render_panel(s: Session, assessment_id: int) -> str:
    var t=x.refs.length, c=Object.keys(covd).filter(function(r){{return x.refs.indexOf(r)>=0}}).length;
    return {{c:c,t:t,ratio:t?c/t:0}};
  }}
+ // 두 단계 문턱 — services/review/coverage.py unit_by_coverage 와 같은 규칙.
+ // ① 요소: 항목 인정 비율 ≥ HI → 요소 인정  ② 단위: 인정 요소 비율 ≥ HI 인정 · ≥ LO 보류 · 미만 불인정
  function unitCalc(u){{
-   var c=0,t=0,r=0; u.els.forEach(function(e){{var k=cov(byEid[e]); c+=k.c; t+=k.t; r+=k.ratio;}});
-   var ratio=u.els.length?r/u.els.length:0;
-   var v=(u.els.length&&ratio>=HI)?'인정':ratio>=LO?'보류':'불인정';
-   return {{c:c,t:t,ratio:ratio,v:v}};
+   var ok=0,t=u.els.length; u.els.forEach(function(e){{var k=cov(byEid[e]); if(k.t&&k.ratio>=HI) ok++;}});
+   var ratio=t?ok/t:0;
+   var v=(t&&ratio>=HI)?'인정':ratio>=LO?'보류':'불인정';
+   return {{c:ok,t:t,ratio:ratio,v:v}};
  }}
  var VC={{'인정':['good','●'],'보류':['hold','◆'],'불인정':['crit','■']}};
  function recalc(){{
@@ -452,7 +454,7 @@ def render_panel(s: Session, assessment_id: int) -> str:
      ['v-','hv-'].forEach(function(p){{ var st=$(p+u.code); if(st){{ st.className='st '+VC[k.v][0]; st.innerHTML='<i>'+VC[k.v][1]+'</i>'+k.v; }} }});
      var band=k.ratio>=HI?'상':k.ratio>=LO?'중':'하';
      var m=$('m-'+u.code); if(m){{ m.textContent=band; m.className='b '+({{'상':'good','중':'hold','하':'crit'}})[band]; }}
-     var mc=$('mc-'+u.code); if(mc) mc.textContent='항목 '+k.c+'/'+k.t+' 인정 ('+Math.round(k.ratio*100)+'%)';
+     var mc=$('mc-'+u.code); if(mc) mc.textContent='요소 '+k.c+'/'+k.t+' 인정 ('+Math.round(k.ratio*100)+'%)';
      var h=$('h-'+u.code); if(h) h.textContent=k.c+'/'+k.t;
      u.els.forEach(function(e){{ var ec=$('ec-'+e); if(ec) ec.textContent=cov(byEid[e]).c; }});
    }});

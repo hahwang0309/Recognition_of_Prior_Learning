@@ -276,3 +276,10 @@ def test_evidence_fit_must_be_in_vocabulary(pkg, good, rb):
     assert codes(pkg, good, rb) == {"fit_어휘": 1}
     del good["elements"][0]["evidence"][0]["fit"]
     assert codes(pkg, good, rb) == {"fit_어휘": 1}
+
+
+def test_list_ksa_ref_is_error_not_crash(pkg, good, rb):
+    # 실제 사고(2026-09-28 A1): 모델이 ksa_ref 를 목록으로 돌려줘 set 조회에서 TypeError 로 판정이 죽었다.
+    good["elements"][0]["evidence"][0]["ksa_ref"] = ["지식1", "지식2"]
+    c = codes(pkg, good, rb)
+    assert c["ksa_ref_없음"] == 1
