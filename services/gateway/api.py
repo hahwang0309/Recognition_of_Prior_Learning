@@ -283,12 +283,12 @@ def _need_assessment(s: Session, aid: int) -> None:
 
 
 @app.get("/assessments/{aid}/review", response_class=HTMLResponse)
-def review_screen(aid: int, s: Session = Depends(get_session)):
-    """전문가 검토 화면. 근거를 읽고 요소마다 의견을 남긴다."""
+def review_screen(aid: int, ro: int = 0, s: Session = Depends(get_session)):
+    """전문가 검토 화면. 근거를 읽고 요소마다 의견을 남긴다. `?ro=1` 이면 열람 전용(입력·제출 막음)."""
     _need_assessment(s, aid)
     kind = s.execute(text("SELECT kind FROM assessment WHERE id=:i"),
                      {"i": aid}).scalar_one()
-    return HTMLResponse(render_track_a(s, aid) if kind == "time" else render_review(s, aid))
+    return HTMLResponse(render_track_a(s, aid, readonly=bool(ro)) if kind == "time" else render_review(s, aid))
 
 
 @app.get("/assessments/{aid}/review/summary", response_model=ReviewSummaryOut)
@@ -310,10 +310,10 @@ def review_progress(aid: int, s: Session = Depends(get_session)):
 
 
 @app.get("/assessments/{aid}/panel", response_class=HTMLResponse)
-def panel(aid: int, s: Session = Depends(get_session)):
-    """위원 페이지 — 한 지원자 한 쪽 (인정·보류·불인정 · 3점표 · 항목별 인정 · 파라미터)."""
+def panel(aid: int, ro: int = 0, s: Session = Depends(get_session)):
+    """위원 페이지 — 한 지원자 한 쪽 (인정·보류·불인정 · 3점표 · 항목별 인정 · 파라미터). `?ro=1` 이면 열람 전용."""
     _need_assessment(s, aid)
-    return HTMLResponse(render_panel(s, aid))
+    return HTMLResponse(render_panel(s, aid, readonly=bool(ro)))
 
 
 @app.post("/assessments/{aid}/panel/submit")

@@ -139,7 +139,9 @@ def _eno(eid: str) -> int:
         return 0
 
 
-def render_panel(s: Session, assessment_id: int) -> str:
+def render_panel(s: Session, assessment_id: int, *, readonly: bool = False) -> str:
+    """readonly=True — 열람 전용(`?ro=1`). 4차 TF 체험 세션에서 위원이 자기 기기로 근거·원문을 보되
+    체크·제출은 못 하게 한다(판정 입력은 진행자 화면에서 다수결로 넣는다). 체크박스는 보이되 눌리지 않는다."""
     rb = get_rubric()
     a = s.execute(text("""
         SELECT a.id, a.submission_id, a.rubric_version, a.model, a.finished_at,
@@ -397,7 +399,7 @@ def render_panel(s: Session, assessment_id: int) -> str:
 <div class="tabs" id="dv-tabs"></div><input id="dv-q" placeholder="낱말로 찾기 (모든 문서)"><div class="body" id="dv-b"></div></aside>
 <script>
 (function(){{
- var AID={assessment_id}, TOT={tot}, HI={hi}, LO={lo}, UNITS={_js(units_json)}, ELS={_js(ev_json)};
+ var AID={assessment_id}, RO={1 if readonly else 0}, TOT={tot}, HI={hi}, LO={lo}, UNITS={_js(units_json)}, ELS={_js(ev_json)};
  var $=function(i){{return document.getElementById(i)}};
  var FR={_js(fr_json)}, DN={_js(dn_json)};
  var dv=$('dv'), dvB=$('dv-b'), dvQ=$('dv-q'), dvTabs=$('dv-tabs'), curDoc=null;
@@ -465,8 +467,16 @@ def render_panel(s: Session, assessment_id: int) -> str:
    $('sg-good').style.width=(B['인정']/TOT*100)+'%'; $('sg-hold').style.width=(B['보류']/TOT*100)+'%'; $('sg-crit').style.width=(B['불인정']/TOT*100)+'%';
    $('sl-good').textContent=B['인정']; $('sl-hold').textContent=B['보류']; $('sl-crit').textContent=B['불인정'];
  }}
- var canSave = location.protocol.indexOf('http')===0, queue=Promise.resolve();
+ var canSave = !RO && location.protocol.indexOf('http')===0, queue=Promise.resolve();
  if(canSave) $('submit-f').style.display='inline-flex';
+ if(RO){{
+   // 열람 전용: 체크박스는 그대로 보이되 클릭이 상태를 바꾸지 못하게 capture 단계에서 막는다
+   document.querySelectorAll('table.it input[type=checkbox]').forEach(function(cb){{
+     cb.addEventListener('click', function(ev){{ ev.preventDefault(); note('열람 전용 화면 — 판정 입력은 설문으로', false); }}, true);
+     cb.title='열람 전용';
+   }});
+   document.body.insertAdjacentHTML('afterbegin', '<div style="position:sticky;top:0;z-index:50;background:#fff4d6;color:#5a3d00;padding:8px 16px;font-size:13px;border-bottom:1px solid #e8c98a">열람 전용 화면 — 근거와 원문(문서명 클릭)은 볼 수 있지만 체크·제출은 되지 않습니다. 판정은 설문으로 냅니다.</div>');
+ }}
  // 제출은 AI 1회를 부른다(10~30초). 아무 표시가 없으면 「멈췄다·에러났다」로 읽힌다.
  // 폼은 그대로 보내고 화면만 「도는 중」으로 바꾼다.
  $('submit-f').addEventListener('submit', function(){{

@@ -42,6 +42,7 @@ cp .env.example .env         # 비밀값·환경별 값. 아래 설명 참고
 | `/assessments/{aid}/review` | Track A 위원 페이지(기록 확인 결과 + 위원 추가 인정 시간) |
 | `/assessments/{aid}/panel` | Track B 위원 페이지(항목별 인정·근거 부적합 체크, 문서 열람창) |
 | `/assessments/{aid}/plan` | Track B 확인 계획(「제출」 뒤 생성) |
+| `…/review?ro=1`, `…/panel?ro=1` | 위 두 위원 페이지의 **열람 전용** — 체크박스·시간 입력이 보이되 눌리지 않고 제출이 없다. 집담회에서 위원 기기로 배포할 때(ngrok) 쓴다 |
 | `/assessments/{aid}/exemption` | Track A 면제 결과(최종 판정) |
 | `/audit`, `/audit/{case}` | 감사 산출물(단계별 입력·출력·해시) |
 | `/stats` | 실행 비용·시간 통계 |

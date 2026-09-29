@@ -183,13 +183,14 @@ GAP_CSS = """
 """
 
 
-def render_track_a(s: Session, assessment_id: int, *, editable: bool = True) -> str:
+def render_track_a(s: Session, assessment_id: int, *, editable: bool = True, readonly: bool = False) -> str:
     """기록 확인 결과.
 
     한 렌더러가 두 화면을 그린다 — 그러나 **이름과 할 일이 다르다.**
 
         editable=False   `/submissions/{sid}/report/time`   ① 기록 확인 (읽기 전용)
         editable=True    `/assessments/{aid}/review`        ③ 전문가 검토 (시간 입력·제출)
+        readonly=True    `…/review?ro=1`                     ③ 화면 그대로, 입력·제출만 막음 (4차 체험 세션 위원 열람용)
 
     가르기 전에는 둘 다 「① 기록 확인」이라 적힌 채 입력칸과 제출 버튼을 달고
     있었다. ③ 을 눌러 들어온 사람이 ① 을 보게 되고, 읽기만 하려던 사람에게는
@@ -483,7 +484,16 @@ def render_track_a(s: Session, assessment_id: int, *, editable: bool = True) -> 
     $('sl-good').textContent=rec; $('sl-hold').textContent=hold; $('sl-crit').textContent=rej;
     if($('f-rec')){{ $('f-rec').textContent=rec; $('f-recp').textContent=pct(rec); $('f-rej').textContent=rej; $('f-undec').textContent=undec; }}
   }}
-  var AID={assessment_id}, canSave=location.protocol.indexOf('http')===0;
+  var AID={assessment_id}, RO={1 if readonly else 0}, canSave=!RO && location.protocol.indexOf('http')===0;
+  if(RO){{
+    document.querySelectorAll('input.gh').forEach(function(i){{
+      i.readOnly=true; i.title='열람 전용';
+      i.addEventListener('keydown', function(ev){{ ev.preventDefault(); }});
+      i.addEventListener('wheel', function(ev){{ ev.preventDefault(); }}, {{passive:false}});
+    }});
+    var gs=document.getElementById('g-submit'); if(gs) gs.style.display='none';
+    document.body.insertAdjacentHTML('afterbegin', '<div style="position:sticky;top:0;z-index:50;background:#fff4d6;color:#5a3d00;padding:8px 16px;font-size:13px;border-bottom:1px solid #e8c98a">열람 전용 화면 — 근거와 원문(문서명 클릭)은 볼 수 있지만 시간 입력·제출은 되지 않습니다. 판정은 설문으로 냅니다.</div>');
+  }}
   function note(msg, ok){{ var s=$('save'); if(!s) return; s.textContent=msg; s.style.color= ok?'var(--good)':'var(--crit)'; }}
   var queue=Promise.resolve();
   function save(r){{
