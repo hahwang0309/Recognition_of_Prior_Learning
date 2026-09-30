@@ -39,6 +39,7 @@ td.act .st{padding:6px 13px;font-size:12px;border-radius:7px}
 td.act button.sm{padding:6px 13px;font-size:12px}
 .bar i{display:block;height:100%;background:var(--ac)}
 .mini{font-size:11.5px;color:var(--tm);white-space:nowrap}
+.star{display:inline-block;background:#fff1c2;color:#6b4a00;border:1px solid #e8c98a;border-radius:10px;padding:1px 8px;font-size:12px;font-weight:700;margin-right:6px;white-space:nowrap}
 .empty{color:var(--tm);font-size:12.8px;padding:14px 0}
 /* 이 표는 6열인데 중단점이 없어 좁은 화면에서 가로로 넘쳤다.
    좁아지면 카드처럼 쌓고, 각 칸 앞에 무엇인지 붙인다. */
@@ -116,7 +117,7 @@ def render_dashboard(rows: list[dict], queue: dict, worker_ok: bool,
                    f'{r["recognized_hours"]}/{r["total_hours"]}h</span>'
                    if r["decision"] else "")
             body += f"""<tr>
- <td><a href="/submissions/{r['id']}"><b>{e(r['case_number'])}</b></a>{track_chip(r.get('track'))}</td>
+ <td>{('<span class="star">' + e(r['note']) + '</span> ') if (r.get('note') or '').startswith('★') else ''}<a href="/submissions/{r['id']}"><b>{e(r['case_number'])}</b></a>{track_chip(r.get('track'))}</td>
  <td>{e(r['official_name'] or r['target_program_id'])}
      <span class="mini">서류 {r['n_doc']} · {e(r.get('hours_note') or '')}</span></td>
  <td>{prog}</td>

@@ -578,7 +578,7 @@ def dashboard(s: Session = Depends(get_session)):
     """접수 현황. 단계별로 묶고 다음 할 일 버튼을 하나씩 놓는다."""
     rows = [dict(r) for r in s.execute(text("""
         SELECT sub.id, sub.case_number, sub.track, sub.target_program_id, sub.status,
-               sub.received_at, p.official_name,
+               sub.received_at, sub.note, p.official_name,
                (SELECT count(*) FROM document d WHERE d.submission_id=sub.id) AS n_doc,
                (SELECT count(*) FROM fragment f WHERE f.submission_id=sub.id) AS n_frag,
                a.id AS aid,
@@ -590,7 +590,8 @@ def dashboard(s: Session = Depends(get_session)):
         LEFT JOIN LATERAL (SELECT * FROM assessment z WHERE z.submission_id=sub.id
                            ORDER BY z.id DESC LIMIT 1) a ON true
         LEFT JOIN final_decision fd ON fd.submission_id = sub.id
-        ORDER BY sub.received_at DESC""")).mappings()]
+        -- 비고가 「★」로 시작하는 건은 맨 위에 — 집담회처럼 「오늘 볼 것」을 표시할 때 쓴다
+        ORDER BY (sub.note LIKE '★%') DESC, sub.note, sub.received_at DESC""")).mappings()]
 
     # 「다음 할 일」과 시간 요약은 case_state 가 정한다 — 목록과 개요가
     # 각자 SQL 로 답하면 반드시 어긋난다. 건수가 적어 그대로 돈다.
