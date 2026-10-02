@@ -283,3 +283,57 @@ def test_list_ksa_ref_is_error_not_crash(pkg, good, rb):
     good["elements"][0]["evidence"][0]["ksa_ref"] = ["지식1", "지식2"]
     c = codes(pkg, good, rb)
     assert c["ksa_ref_없음"] == 1
+
+
+# ───────────────────────── 신형(수행준거) 산출물 (2026-10-02) ─────────────────────────
+
+@pytest.fixture
+def pkg_pc(pkg):
+    """같은 패키지에 수행준거 번호가 붙은 것. ksa 는 구형 호환으로 남아 있어도 된다."""
+    p = copy.deepcopy(pkg)
+    p["ncs"]["units"][0]["elements"][0]["performance_criteria"] = [
+        {"ref": "준거1", "text": "배합비를 계산할 수 있다."}, {"ref": "준거2", "text": "반죽을 만들 수 있다."}]
+    return p
+
+
+@pytest.fixture
+def good_pc(good):
+    g = copy.deepcopy(good)
+    el = g["elements"][0]
+    el["schema"] = "pc"
+    el["evidence"] = [{"pc_ref": "준거1", "fids": ["D02-S01"], "grade": "E", "fit": "직접",
+                       "quote": "밀가루 배합비를 계산해", "why": "직접 수행 진술"}]
+    el["uncovered_pc"] = [{"ref": "준거2", "status": "미확보"}]
+    el["remediation"] = [{"pc_refs": ["준거2"], "method": "면접", "item": "반죽 제조 경험 확인",
+                          "oral_check": ["반죽 온도는 어떻게 맞췄나"], "reason": "진술만 있음"}]
+    for k in ("uncovered_ksa", "proven_dimensions", "missing_dimensions"):
+        el.pop(k, None)
+    return g
+
+
+def test_pc_output_passes(pkg_pc, good_pc, rb):
+    assert codes(pkg_pc, good_pc, rb) == {}
+
+
+def test_pc_ref_must_exist_and_sum_must_match(pkg_pc, good_pc, rb):
+    good_pc["elements"][0]["evidence"][0]["pc_ref"] = "준거9"
+    c = codes(pkg_pc, good_pc, rb)
+    assert c["pc_ref_없음"] == 1 and c["PC_합_불일치"] == 1
+    good_pc["elements"][0]["evidence"][0]["pc_ref"] = ["준거1"]       # 목록형 방어
+    assert codes(pkg_pc, good_pc, rb)["pc_ref_없음"] == 1
+
+
+def test_pc_remediation_must_cover_uncovered(pkg_pc, good_pc, rb):
+    good_pc["elements"][0]["remediation"][0]["pc_refs"] = ["준거1"]
+    c = codes(pkg_pc, good_pc, rb)
+    assert c["보완계획_불일치"] == 1 and "보완_pc없음" not in c
+
+
+def test_pc_format_skips_ksa_dimension_check(pkg_pc, good_pc, rb):
+    good_pc["elements"][0]["proven_dimensions"] = ["없는차원"]
+    assert "차원명_오류" not in codes(pkg_pc, good_pc, rb)
+
+
+def test_old_format_still_validates(pkg_pc, good, rb):
+    """수행준거가 패키지에 있어도 구형(ksa_ref) 산출물은 구형 규칙으로 검증된다 — 전환기 호환."""
+    assert codes(pkg_pc, good, rb) == {}

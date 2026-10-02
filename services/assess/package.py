@@ -41,11 +41,12 @@ def _units(s: Session, program_id: str) -> list[dict]:
         ORDER BY unit_code, element_no"""), {"c": codes}).mappings():
         els.setdefault(r["unit_code"], []).append(dict(r))
 
-    pcs: dict[tuple[str, int], list[str]] = {}
-    for uc, en, txt in s.execute(text("""
-        SELECT unit_code, element_no, pc_text FROM catalog_ncs_pc
+    # 수행준거에 번호(「준거1」…)를 붙인다 — 2026-10-02 부터 AI 가 근거를 수행준거에 붙인다.
+    pcs: dict[tuple[str, int], list[dict]] = {}
+    for uc, en, no, txt in s.execute(text("""
+        SELECT unit_code, element_no, pc_no, pc_text FROM catalog_ncs_pc
         WHERE unit_code = ANY(:c) ORDER BY unit_code, element_no, pc_no"""), {"c": codes}):
-        pcs.setdefault((uc, en), []).append(txt)
+        pcs.setdefault((uc, en), []).append({"ref": f"준거{no}", "text": txt})
 
     # KSA 는 수행준거마다 반복 수록된다. (유형, 번호) 로 중복을 걷어낸다.
     ksa: dict[tuple[str, int], dict[str, str]] = {}
@@ -161,7 +162,8 @@ def package_hash(package: dict) -> str:
 
 def package_stats(package: dict) -> dict:
     n_el = sum(len(u["elements"]) for u in package["ncs"]["units"])
-    n_ksa = sum(len(e["ksa"]) for u in package["ncs"]["units"] for e in u["elements"])
+    n_ksa = sum(len(e.get("ksa") or []) for u in package["ncs"]["units"] for e in u["elements"])
+    n_pc = sum(len(e.get("performance_criteria") or []) for u in package["ncs"]["units"] for e in u["elements"])
     return {"n_documents": len(package["documents"]), "n_fragments": len(package["fragments"]),
-            "n_units": len(package["ncs"]["units"]), "n_elements": n_el, "n_ksa": n_ksa,
+            "n_units": len(package["ncs"]["units"]), "n_elements": n_el, "n_ksa": n_ksa, "n_pc": n_pc,
             "n_prior_learning": len(package["prior_learning"])}

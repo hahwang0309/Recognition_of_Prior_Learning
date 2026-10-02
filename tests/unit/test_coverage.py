@@ -128,3 +128,79 @@ def test_unit_verdict_follows_recognized_items(rb):
     # 척도·질문 표시는 기록용 — 판정 불변
     adds = {"U_1.2": ["add:기술1", "add:지식1", "s:match:하", "q:1:부"]}
     assert unit_by_coverage([e1, e2], rb, adds, refs)["verdict"] == "인정"
+
+
+# ───────────────────────── 수행준거 점수 (신형, 2026-10-02) ─────────────────────────
+
+def _pc(evs, decided_by=None, schema="pc"):
+    """evs: [(pc_ref, fit)] → 신형 요소 payload."""
+    p = {"schema": schema,
+         "evidence": [{"pc_ref": r, "fids": [f"D01-P0{i % 9 + 1}"], "grade": "B", "fit": fit}
+                      for i, (r, fit) in enumerate(evs)]}
+    if decided_by:
+        p["decided_by"] = decided_by
+    return p
+
+
+PCS3 = [{"ref": "준거1", "text": "a"}, {"ref": "준거2", "text": "b"}, {"ref": "준거3", "text": "c"}]
+
+
+def test_pc_score_is_existence_based(rb):
+    """직접 1건↑ → 2 · 간접만 → 1 · 없음 → 0 · 부정 → 0. 근거가 많아져도 내려가지 않는다."""
+    from services.review.coverage import pc_score, is_pc_format
+    p = _pc([("준거1", "직접"), ("준거1", "간접"), ("준거1", "간접"), ("준거1", "간접"),   # 직접 1 · 간접 3 → 2
+             ("준거2", "간접"), ("준거2", "간접"),                                          # 간접만 → 1
+             ("준거3", "직접"), ("준거3", "부정")])                                          # 부정 → 0
+    assert is_pc_format(p)
+    assert pc_score(p, "준거1", (), rb) == (2, "ai"), "간접이 과반이어도 직접이 있으면 2"
+    assert pc_score(p, "준거2", (), rb) == (1, "ai")
+    assert pc_score(p, "준거3", (), rb) == (0, "ai"), "부정 진술이 붙으면 0"
+    assert pc_score(p, "준거9", (), rb) == (0, "ai"), "근거 없음"
+    # 알 수 없는 fit 은 간접으로
+    assert pc_score(_pc([("준거1", "간직")]), "준거1", (), rb) == (1, "ai")
+    # 기이수(규칙) 요소는 전부 2
+    assert pc_score(_pc([], decided_by="rule"), "준거1", (), rb) == (2, "rule")
+
+
+def test_pc_override_by_reviewer(rb):
+    from services.review.coverage import pc_score, pc_overrides
+    p = _pc([("준거1", "직접")])
+    assert pc_overrides(["pc:준거1=0", "pc:준거2=2", "pc:준거3=7", "add:기술1", "D01-P01"]) == {"준거1": 0, "준거2": 2}
+    assert pc_score(p, "준거1", ["pc:준거1=0"], rb) == (0, "reviewer")
+    assert pc_score(p, "준거2", ["pc:준거2=2"], rb) == (2, "reviewer")
+    assert pc_score(p, "준거3", ["pc:준거3=7"], rb) == (0, "ai"), "어휘 밖 값은 무시"
+
+
+def test_unit_by_scores_rule_and_boundaries(rb):
+    """모든 수행준거 ≥1 이고 평균 ≥1.5 인정 · ≥1.0 보류 · 0 이 하나라도 있으면 불인정."""
+    from services.review.coverage import unit_by_scores
+    pcs = {"U_1.1": PCS3, "U_1.2": [{"ref": "준거1", "text": "d"}]}
+    # [2,2,1,1] 평균 1.5 → 인정 (경계 포함)
+    e1 = _pc([("준거1", "직접"), ("준거2", "직접"), ("준거3", "간접")]); e2 = _pc([("준거1", "간접")])
+    r = unit_by_scores([("U_1.1", e1), ("U_1.2", e2)], rb, {}, pcs)
+    assert (r["n_pc"], r["n_zero"], r["mean"], r["verdict"]) == (4, 0, 1.5, "인정")
+    assert (r["n_covered"], r["n_total"], r["ratio"]) == (4, 4, 0.75), "구형 키 호환"
+    # [2,1,1,1] 평균 1.25 → 보류
+    e1b = _pc([("준거1", "직접"), ("준거2", "간접"), ("준거3", "간접")])
+    assert unit_by_scores([("U_1.1", e1b), ("U_1.2", e2)], rb, {}, pcs)["verdict"] == "보류"
+    # [2,2,2,0] 평균 1.5 지만 0 이 있어 불인정
+    e1c = _pc([("준거1", "직접"), ("준거2", "직접"), ("준거3", "직접")]); e2c = _pc([])
+    r3 = unit_by_scores([("U_1.1", e1c), ("U_1.2", e2c)], rb, {}, pcs)
+    assert r3["verdict"] == "불인정" and r3["n_zero"] == 1
+    # 위원이 그 0 을 1 로 올리면 [2,2,2,1] 평균 1.75 → 인정. 표시는 요소별 dict 로만 받는다
+    r4 = unit_by_scores([("U_1.1", e1c), ("U_1.2", e2c)], rb, {"U_1.2": ["pc:준거1=1"]}, pcs)
+    assert r4["verdict"] == "인정" and r4["scores"][-1]["src"] == "reviewer"
+    with pytest.raises(TypeError):
+        unit_by_scores([("U_1.1", e1c)], rb, ["pc:준거1=1"], pcs)
+    # 수행준거가 없으면 불인정
+    assert unit_by_scores([("U_1.1", e1c)], rb, {}, {})["verdict"] == "불인정"
+    # [1,1,1,1] 평균 1.0 → 보류 (경계) · [1,1,1,0]… 는 위에서. 평균 1.0 미만은 0 없이는 불가능
+    e_all1 = _pc([("준거1", "간접"), ("준거2", "간접"), ("준거3", "간접")])
+    assert unit_by_scores([("U_1.1", e_all1), ("U_1.2", e2)], rb, {}, pcs)["verdict"] == "보류"
+
+
+def test_old_format_is_not_pc(rb):
+    from services.review.coverage import is_pc_format
+    assert not is_pc_format(_p("R2", [("기술1", ["D05-P01"], "B")]))
+    assert not is_pc_format({"evidence": []})
+    assert is_pc_format({"schema": "pc", "evidence": []}), "근거 없는 신형 R5 는 schema 표시로 안다"

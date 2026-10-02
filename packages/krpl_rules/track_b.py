@@ -122,7 +122,9 @@ def validate_track_b(package: dict, out: dict, rubric) -> ValidationReport:
             elems[e["element_id"]] = {
                 "unit_code": u["unit_code"], "unit_name": u["unit_name"],
                 "required_hours": u["required_hours"],
-                "refs": {k["ref"] for k in e["ksa"]},
+                "refs": {k["ref"] for k in (e.get("ksa") or [])},                      # 구형(항목 단위)
+                "pc_refs": {p["ref"] for p in (e.get("performance_criteria") or [])   # 신형(수행준거, 2026-10-02)
+                            if isinstance(p, dict) and p.get("ref")},
             }
 
     got = [x.get("element_id") for x in out.get("elements") or []]
@@ -141,6 +143,13 @@ def validate_track_b(package: dict, out: dict, rubric) -> ValidationReport:
             continue
         M = elems[eid]
         rec = el.get("recommendation")
+        # 형식 인식 — 신형(수행준거)은 `schema: "pc"` 또는 evidence 의 pc_ref 로 안다.
+        # 구형(항목 단위) 산출물·픽스처도 그대로 검증되어야 한다(2026-10-02 전환기).
+        pc_fmt = el.get("schema") == "pc" or any(
+            isinstance(ev, dict) and ev.get("pc_ref") for ev in (el.get("evidence") or []))
+        REF, UNC, REM, LABEL = (("pc_ref", "uncovered_pc", "pc_refs", "PC") if pc_fmt
+                                else ("ksa_ref", "uncovered_ksa", "ksa_refs", "KSA"))
+        REFS = M["pc_refs"] if pc_fmt else M["refs"]
 
         for fld, ok in (("evidence_level", set(vocab["evidence_level"])),
                         ("recommendation", RECS),
@@ -149,6 +158,8 @@ def validate_track_b(package: dict, out: dict, rubric) -> ValidationReport:
             if el.get(fld) not in ok:
                 add(f"{fld}_오류", eid, repr(el.get(fld)))
         for fld in ("proven_dimensions", "missing_dimensions"):
+            if pc_fmt:          # 신형 입력에는 KSA 차원이 없다 — 칸 자체를 내지 않는다
+                break
             for d in el.get(fld) or []:
                 if d not in DIMS:
                     add("차원명_오류", eid, f"{fld}={d}")
@@ -160,15 +171,15 @@ def validate_track_b(package: dict, out: dict, rubric) -> ValidationReport:
             rep.n_evidence += 1
             # 모델이 ksa_ref 를 목록으로 돌려준 적이 있다(A1 R2026-9101, 2026-09-28) — set 조회에서
             # TypeError 로 판정 전체가 죽었다. 문자열이 아니면 「없음」 오류로 다루고 다시 요청한다.
-            if not isinstance(ev.get("ksa_ref"), str) or ev.get("ksa_ref") not in M["refs"]:
-                add("ksa_ref_없음", eid, repr(ev.get("ksa_ref")))
+            if not isinstance(ev.get(REF), str) or ev.get(REF) not in REFS:
+                add(f"{REF}_없음", eid, repr(ev.get(REF)))
             else:
-                seen.add(ev["ksa_ref"])
+                seen.add(ev[REF])
             fids = ev.get("fids") or []
             if not fids:
-                add("fid_없음", eid, f"ksa_ref={ev.get('ksa_ref')}")
+                add("fid_없음", eid, f"{REF}={ev.get(REF)}")
             if "evidence_fit" in vocab and ev.get("fit") not in set(vocab["evidence_fit"]):
-                add("fit_어휘", eid, f"ksa_ref={ev.get('ksa_ref')} fit={ev.get('fit')!r}")
+                add("fit_어휘", eid, f"{REF}={ev.get(REF)} fit={ev.get('fit')!r}")
             for fid in fids:
                 if fid not in frags:
                     add("fid_존재하지않음", eid, fid)
@@ -224,21 +235,21 @@ def validate_track_b(package: dict, out: dict, rubric) -> ValidationReport:
             elif q and q not in frags[fid]["text"]:
                 add("부정_인용불일치", eid, q[:40])
 
-        # ── 증거 없는 KSA ──
-        for x in el.get("uncovered_ksa") or []:
+        # ── 증거 없는 항목(구형 KSA / 신형 수행준거) ──
+        for x in el.get(UNC) or []:
             if not isinstance(x, dict):
                 add("uncovered_구형식", eid, str(x))
                 continue
-            if x.get("ref") not in M["refs"]:
+            if x.get("ref") not in REFS:
                 add("uncovered_ref_없음", eid, repr(x.get("ref")))
             if x.get("status") not in USTATUS:
                 add("uncovered_status_오류", eid, repr(x.get("status")))
-        unc = _refs(el.get("uncovered_ksa"))
+        unc = _refs(el.get(UNC))
 
-        # KSA 전수 배정 — R0 는 기이수로 갈음하므로 제외
-        if rec != "R0" and (tot := len(seen | unc)) != len(M["refs"]):
-            missing = sorted(M["refs"] - seen - unc)
-            add("KSA_합_불일치", eid, f"{tot}/{len(M['refs'])} 빠짐 {missing[:6]}")
+        # 전수 배정 — R0 는 기이수로 갈음하므로 제외
+        if rec != "R0" and (tot := len(seen | unc)) != len(REFS):
+            missing = sorted(REFS - seen - unc)
+            add(f"{LABEL}_합_불일치", eid, f"{tot}/{len(REFS)} 빠짐 {missing[:6]}")
 
         # ── 보완계획 ──
         rem = el.get("remediation")
@@ -277,9 +288,9 @@ def validate_track_b(package: dict, out: dict, rubric) -> ValidationReport:
                 # 고쳤으니 새로 도는 판정부터는 질문이 붙는다.
                 if r.get("method") == "면접" and not (r.get("oral_check") or []):
                     add("면접_질문없음", eid, (r.get("item") or "")[:40], "warn")
-                for k in r.get("ksa_refs") or []:
-                    if k not in M["refs"]:
-                        add("보완_ksa없음", eid, k)
+                for k in r.get(REM) or []:
+                    if k not in REFS:
+                        add(f"보완_{'pc' if pc_fmt else 'ksa'}없음", eid, k)
                     covered.add(k)
             if covered != unc:
                 add("보완계획_불일치", eid,
@@ -288,11 +299,11 @@ def validate_track_b(package: dict, out: dict, rubric) -> ValidationReport:
         # ── 기준서 철칙 ──
         if rec == "R1" and not (pb_grades & r1_grades):
             add("R1철칙_위반", eid, f"기간보증 등급 {sorted(pb_grades)} — {sorted(r1_grades)} 필요")
-        if rec == "R1" and ksa_min is not None and M["refs"]:
-            # 커버리지 = 근거가 붙은 KSA ÷ 요소의 KSA 전체. uncovered 는 위에서 모았다.
-            cov = 1 - len(_refs(el.get("uncovered_ksa"))) / len(M["refs"])
+        if rec == "R1" and ksa_min is not None and REFS:
+            # 커버리지 = 근거가 붙은 항목 ÷ 전체 (신형은 수행준거). uncovered 는 위에서 모았다.
+            cov = 1 - len(unc) / len(REFS)
             if cov < ksa_min:
-                add("R1_커버리지_미달", eid, f"KSA 커버리지 {cov:.0%} < 하한 {ksa_min:.0%}")
+                add("R1_커버리지_미달", eid, f"{LABEL} 커버리지 {cov:.0%} < 하한 {ksa_min:.0%}")
         if rec == "R1" and not ksa_min_decided:
             add("기준미확정_R1", eid, f"쟁점 4 — KSA 커버리지 하한 {ksa_min:.0%} 는 임시값, TF 결정 필요", "warn")
         if (rubric.rules.get("R8_negative_priority", {}).get("enabled", True)
@@ -319,7 +330,8 @@ def validate_track_b(package: dict, out: dict, rubric) -> ValidationReport:
         "증거수준": dict(Counter(x.get("evidence_level") for x in els)),
         "보완방법": dict(Counter(r.get("method") for x in els for r in (x.get("remediation") or []))),
         "미확보상태": dict(Counter(u.get("status") for x in els
-                                for u in (x.get("uncovered_ksa") or []) if isinstance(u, dict))),
+                                for u in ((x.get("uncovered_pc") or []) + (x.get("uncovered_ksa") or []))
+                                if isinstance(u, dict))),
     }
     rep.counts["대면평가"] = {
         "건수": sum(1 for x in els for r in (x.get("remediation") or []) if r.get("method") in FACE),

@@ -140,6 +140,7 @@ recommendations:
       performance_proven: true
       period_backing_grades: [A, B]   # ★ 본인진술(E) 단독 R1 금지
       ksa_coverage_min: 0.50          # ⚠ 쟁점 4 — 임시값(2026-09-23, Track A 인정선과 같은 50%). TF 결정 필요. 검증기가 실제 비율로 확인
+                                      #   2026-10-02: 신형(수행준거) 판정에서는 「점수 ≥1 인 수행준거 비율」. 키 이름은 호환을 위해 유지
   R2: {label: 면접확인,     action: 화상면접,      priority: 2}
   R3: {label: 실기확인,     action: 대면실기·시연,  priority: 3}
   R4: {label: 추가서류요청, action: 서류 보완,     priority: 4}
@@ -229,6 +230,24 @@ track_b:
   practical_to_external: true
   # 3점 정량표의 축. 시간·기간은 문서에서 읽는 표시용 추정(time_axis) — App 본 계산이 아니다.
   three_point_axes: [내용일치성, 시간기간, 검증가능성]
+  # ── 수행준거 점수 (2026-10-02, 4차 TF 합의) ──
+  #   판정 단위가 KSA 항목에서 수행준거로 바뀌었다. 수행준거마다 0/1/2 점을 매긴다.
+  #   존재 기준: 직접 근거가 1건이라도 있으면 2, 직접은 없고 간접만 있으면 1, 근거가 없으면 0.
+  #   부정 진술이 붙은 수행준거는 0 (negative_overrides). 위원이 0/1/2 를 직접 고칠 수 있다.
+  #   「과반」 기준은 쓰지 않는다 — 근거 조각 수는 AI 실행마다 달라 분모가 우연값이 된다.
+  pc_scoring:
+    values: [0, 1, 2]                 # 점수 어휘 (위원 입력 검증용)
+    direct: 2
+    indirect: 1
+    none: 0
+    negative_overrides: true
+  # 능력단위 판정: 0 인 수행준거가 하나라도 있으면 불인정(require_all_nonzero),
+  #   전부 ≥1 이고 평균 ≥ accept_mean → 인정 · 평균 ≥ hold_mean → 보류 · 미만 → 불인정.
+  #   1.5 는 「절반은 2, 절반은 1」인 출발값이다(4차 TF 직후 합의). 경험적으로 검증한다.
+  unit_rule:
+    require_all_nonzero: true
+    accept_mean: 1.5                  # ⚠ 미확정 — 5차 TF
+    hold_mean: 1.0                    # ⚠ 미확정 — 5차 TF
 
 # ── AI 산출물 어휘 ─────────────────────────────────────────────
 #   Track B 분석기가 쓸 수 있는 값의 전부. 검증기가 이 목록으로 대조한다.
@@ -237,7 +256,7 @@ output_vocabulary:
   evidence_level: [충분, 부분, 없음, 부정진술]
   verification_method: [불필요, 화상면접, 대면실기, 추가서류, 훈련]
   confidence: [high, medium, low]
-  evidence_fit: [직접, 간접, 부정]     # 근거 적합도 (2026-09-24). 직접 → 인정 · 간접 → 위원 판단 · 부정 → 불인정
+  evidence_fit: [직접, 간접, 부정]     # 근거 적합도 (2026-09-24). 직접 → 2점 · 간접 → 1점 · 부정 → 0점 (2026-10-02 수행준거 점수)
 
 # ── 보완 부담 최소화 ───────────────────────────────────────────
 remediation:
@@ -307,3 +326,4 @@ pending_decisions:
   - {key: final_decision.unit_credit_rule,              issue: D-7,    urgency: high}
   - {key: track_a.verdicts.보류,                          issue: 2차TF 쟁점3, urgency: high}   # 30~50% 보류 구간 vs 자격 단위 인정
   - {key: track_b.practical_to_external,                 issue: 3차TF 실기, urgency: medium}  # 실기(R3)를 외부평가에 맡길지
+  - {key: track_b.unit_rule.accept_mean,                 issue: 4차TF 수행준거 문턱, urgency: critical}   # 1.5 / 1.0 은 출발값

@@ -11,16 +11,145 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 
-ADD = "add:"       # 위원이 근거 없는 항목을 직접 인정한 표시: "add:기술3"
+ADD = "add:"       # 위원이 근거 없는 항목을 직접 인정한 표시: "add:기술3" (구형·항목 단위)
 Q = "q:"           # 위원의 질문 가/부 답: "q:1:가" — 기록만, 커버리지에 안 쓴다
 S = "s:"           # 위원의 3점 척도: "s:match:상" — 기록만, 커버리지에 안 쓴다
+PC = "pc:"         # 위원이 수행준거 점수를 고친 표시: "pc:준거3=1" (신형, 2026-10-02)
+MARK_PREFIXES = (ADD, Q, S, PC)
+
+
+# ───────────────────────── 수행준거 점수 (신형, 2026-10-02) ─────────────────────────
+#
+# 4차 TF: 판정 단위를 KSA 항목에서 수행준거로. 수행준거마다 0/1/2 점.
+#   존재 기준 — 직접 근거 1건↑ → 2 · 직접 없고 간접만 → 1 · 없음 → 0 · 부정 진술 → 0.
+#   위원이 "pc:<ref>=<n>" 표시로 덮어쓴다. 기이수(decided_by: rule) 요소는 전부 2.
+# 능력단위 — 0 인 수행준거가 있으면 불인정 · 전부 ≥1 이고 평균 ≥ accept_mean(1.5) 인정 ·
+#   ≥ hold_mean(1.0) 보류 · 미만 불인정. 값은 rubric.track_b.pc_scoring / unit_rule.
+# 신형에서 fid 제외 표시(구형 「근거 부적합」)는 쓰지 않는다 — 점수를 고치면 된다.
+
+
+def is_pc_format(payload: dict[str, Any]) -> bool:
+    """신형(수행준거) 요소인가. `schema: "pc"` 표시가 기준이다 — 근거가 없는 R5 요소는
+    evidence 로는 구분할 수 없으므로 반드시 이 표시를 찍어 둔다(_store·prior_credit)."""
+    if (payload or {}).get("schema") == "pc":
+        return True
+    return any(isinstance(ev, dict) and ev.get("pc_ref") for ev in (payload or {}).get("evidence") or [])
+
+
+def pc_overrides(marks: Iterable[str]) -> dict[str, int]:
+    """{"준거3": 1} — "pc:준거3=1" 표시를 푼다. 잘못된 값은 무시한다."""
+    out: dict[str, int] = {}
+    for m in marks or ():
+        if isinstance(m, str) and m.startswith(PC) and "=" in m:
+            ref, _, v = m[len(PC):].partition("=")
+            if v.strip() in ("0", "1", "2"):
+                out[ref.strip()] = int(v)
+    return out
+
+
+def _pc_cfg(rubric) -> tuple[dict, dict]:
+    tb = getattr(rubric, "track_b", None) or {}
+    sc = dict(tb.get("pc_scoring") or {})
+    ur = dict(tb.get("unit_rule") or {})
+    sc.setdefault("direct", 2); sc.setdefault("indirect", 1); sc.setdefault("none", 0)
+    sc.setdefault("negative_overrides", True)
+    ur.setdefault("require_all_nonzero", True); ur.setdefault("accept_mean", 1.5); ur.setdefault("hold_mean", 1.0)
+    return sc, ur
+
+
+def pc_score(payload: dict[str, Any], ref: str, marks: Iterable[str] = (), rubric=None) -> tuple[int, str]:
+    """수행준거 하나의 (점수, 출처). 출처: reviewer | rule | ai.
+
+    알 수 없는 fit 값은 간접으로 본다(화면은 「알 수 없는 값」을 따로 표시한다).
+    """
+    from krpl_core.config import get_rubric
+    sc, _ = _pc_cfg(rubric or get_rubric())
+    ov = pc_overrides(marks)
+    if ref in ov:
+        return ov[ref], "reviewer"
+    if (payload or {}).get("decided_by") == "rule":
+        return sc["direct"], "rule"
+    direct = indirect = negative = 0
+    for ev in (payload or {}).get("evidence") or []:
+        if not isinstance(ev, dict) or ev.get("pc_ref") != ref:
+            continue
+        fit = ev.get("fit") or "직접"
+        if fit == "직접":
+            direct += 1
+        elif fit == "부정":
+            negative += 1
+        else:
+            indirect += 1
+    if negative and sc["negative_overrides"]:
+        return sc["none"], "ai"
+    if direct:
+        return sc["direct"], "ai"
+    if indirect:
+        return sc["indirect"], "ai"
+    return sc["none"], "ai"
+
+
+def element_scores(payload: dict[str, Any], pcs: list[dict], marks: Iterable[str] = (),
+                   rubric=None) -> list[dict[str, Any]]:
+    """요소의 수행준거마다 [{ref, text, score, src, n_direct, n_indirect, n_negative}]."""
+    from krpl_core.config import get_rubric
+    rb = rubric or get_rubric()
+    out = []
+    for pc in pcs or []:
+        ref = pc["ref"]
+        cnt = {"직접": 0, "간접": 0, "부정": 0}
+        for ev in (payload or {}).get("evidence") or []:
+            if isinstance(ev, dict) and ev.get("pc_ref") == ref:
+                fit = ev.get("fit") or "직접"
+                cnt["직접" if fit == "직접" else "부정" if fit == "부정" else "간접"] += 1
+        score, src = pc_score(payload, ref, marks, rb)
+        out.append({"ref": ref, "text": pc.get("text", ""), "score": score, "src": src,
+                    "n_direct": cnt["직접"], "n_indirect": cnt["간접"], "n_negative": cnt["부정"]})
+    return out
+
+
+def unit_by_scores(elements: list[tuple[str, dict[str, Any]]], rubric,
+                   marks_of: dict[str, Iterable[str]] | None = None,
+                   pcs_of: dict[str, list[dict]] | None = None) -> dict[str, Any]:
+    """능력단위 판정 — 수행준거 점수 규칙 (2026-10-02).
+
+    `marks_of` 는 반드시 요소별 dict 다 — 수행준거 번호가 요소마다 다시 시작하므로
+    평탄한 목록을 받으면 한 요소의 "pc:준거1=0" 이 다른 요소로 샌다.
+    돌려주는 키는 구형 `unit_by_coverage` 와 호환: ratio(=평균÷2) · n_covered(=점수≥1 수) · n_total(=수행준거 수).
+    """
+    if marks_of is not None and not isinstance(marks_of, dict):
+        raise TypeError("marks_of 는 {element_id: marks} dict 여야 한다")
+    _, ur = _pc_cfg(rubric)
+    scores: list[dict] = []
+    for eid, p in elements:
+        for row in element_scores(p, (pcs_of or {}).get(eid, []), (marks_of or {}).get(eid, ()), rubric):
+            scores.append({"eid": eid, **row})
+    n = len(scores)
+    vals = [r["score"] for r in scores]
+    mean = sum(vals) / n if n else 0.0
+    n_zero = sum(1 for v in vals if v == 0)
+    n_full = sum(1 for v in vals if v == 2)
+    if not n:
+        verdict = "불인정"
+    elif ur["require_all_nonzero"] and n_zero:
+        verdict = "불인정"
+    elif mean >= ur["accept_mean"]:
+        verdict = "인정"
+    elif mean >= ur["hold_mean"]:
+        verdict = "보류"
+    else:
+        verdict = "불인정"
+    return {"verdict": verdict, "mean": round(mean, 3), "n_pc": n, "n_zero": n_zero,
+            "n_nonzero": n - n_zero, "n_full": n_full, "scores": scores,
+            "ratio": mean / 2 if n else 0.0, "n_covered": n - n_zero, "n_total": n, "format": "pc"}
+
 
 
 def covered_refs(payload: dict[str, Any], excluded: Iterable[str] = (),
                  all_refs: Iterable[str] | None = None) -> set[str]:
     """인정된 항목 ref 집합 — element_coverage 와 같은 규칙. 계획 페이지가 「미확인 항목」을 고를 때 쓴다."""
     marks = set(excluded or ())
-    ex = {m for m in marks if not m.startswith((ADD, Q, S))}
+    ex = {m for m in marks if not m.startswith(MARK_PREFIXES)}
     added = {m[len(ADD):] for m in marks if m.startswith(ADD)}
     covered: set[str] = set()
     refs: set[str] = set(all_refs or ())
@@ -48,7 +177,7 @@ def element_coverage(payload: dict[str, Any], excluded: Iterable[str] = (),
     근거의 `fit`(직접|간접|부정, 2026-09-24): **직접만 인정**으로 센다. fit 이 없는 옛 결과는 직접으로 본다.
     """
     marks = set(excluded or ())
-    ex = {m for m in marks if not m.startswith((ADD, Q, S))}
+    ex = {m for m in marks if not m.startswith(MARK_PREFIXES)}
     added = {m[len(ADD):] for m in marks if m.startswith(ADD)}
     covered: set[str] = set()
     refs: set[str] = set(all_refs or ())
