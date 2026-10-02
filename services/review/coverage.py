@@ -139,9 +139,10 @@ def unit_by_scores(elements: list[tuple[str, dict[str, Any]]], rubric,
         verdict = "보류"
     else:
         verdict = "불인정"
-    return {"verdict": verdict, "mean": round(mean, 3), "n_pc": n, "n_zero": n_zero,
+    mean_r = round(mean, 3)
+    return {"verdict": verdict, "mean": mean_r, "n_pc": n, "n_zero": n_zero,
             "n_nonzero": n - n_zero, "n_full": n_full, "scores": scores,
-            "ratio": mean / 2 if n else 0.0, "n_covered": n - n_zero, "n_total": n, "format": "pc"}
+            "ratio": mean_r / 2 if n else 0.0, "n_covered": n - n_zero, "n_total": n, "format": "pc"}
 
 
 

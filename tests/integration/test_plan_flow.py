@@ -79,15 +79,19 @@ def test_submit_writes_snapshot_and_plan_then_page_renders():
     with session_scope() as s:
         st = unit_status(s, aid)
         assert set(st["buckets"]) == {"인정", "보류", "불인정"} and st["units"]
-        # n_covered·n_total 은 **요소 수**다 (2026-09-24 두 단계 게이트).
-        # 항목 목록은 **미인정 요소의 미확인 항목**만 — 이미 인정된 요소는 확인할 것이 없다.
+        # 신형(2026-10-02): n_total 은 **수행준거 수**, n_covered 는 점수 ≥1. 확인 항목은 점수 < 2 인 수행준거,
+        # 요소가 ok(전부 2점)이면 확인할 것이 없다. 구형이면 요소 수·항목 종류 규칙이 그대로다.
         for u in st["units"]:
             assert u["n_total"] >= u["n_covered"]
-            assert u["n_total"] == len(u["elements"]), "세는 것은 요소다"
-            assert u["n_open_elements"] == u["n_total"] - u["n_covered"]
             open_eids = {x["eid"] for x in u["elements"] if not x.get("ok")}
             assert {it["eid"] for it in u["items"]} <= open_eids, "인정된 요소의 항목이 섞였다"
-            assert all(it["kind"] in ("지식", "기술", "태도") for it in u["items"])
+            if u.get("format") == "pc":
+                assert u["n_total"] >= len(u["elements"]), "수행준거는 요소보다 적을 수 없다"
+                assert all(it["kind"] == "준거" and it["score"] in (0, 1) for it in u["items"])
+            else:
+                assert u["n_total"] == len(u["elements"]), "구형은 요소를 센다"
+                assert u["n_open_elements"] == u["n_total"] - u["n_covered"]
+                assert all(it["kind"] in ("지식", "기술", "태도") for it in u["items"])
         plan = submit(s, aid, reviewer="시험위원", client=FakeClient())
         s.flush()
         n_hold = sum(1 for u in st["units"] if u["verdict"] == "보류")
@@ -110,7 +114,7 @@ def test_submit_writes_snapshot_and_plan_then_page_renders():
         assert "1. 시험" in h and "2. 면접" in h and "3. 외부평가" in h
         assert "반구조화" in h, "면접 질문지가 없다"
     else:
-        assert "보류 단위가 없습니다" in h
+        assert "보류 단위가 없어 AI 문안" in h and "1. 시험" not in h, "보류 0 이면 AI 를 부르지 않았다고 말해야 한다"
     # 위원 페이지에 제출 시각이 붙는다
     p = TestClient(app).get(f"/assessments/{aid}/panel").text
     assert "마지막 제출" in p and f"/assessments/{aid}/plan" in p

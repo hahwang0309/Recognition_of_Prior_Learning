@@ -109,7 +109,8 @@ PANEL = {
     "카드 3장": re.compile(r'id="k-rec".*id="k-hold".*id="k-rej"', re.S),
     "3점표": '<table class="tp">',
     # 긴 설명 문단은 2026-09-24 뺐다 — 제목이 할 일을 말한다.
-    "항목별 인정 여부": "<h2>항목별 인정 여부(위원 판정 필요)</h2>",
+    "수행준거별 점수": "<h2>수행준거별 점수(위원 판정 필요)</h2>",
+    "점수 정의": "2 = 직접 근거 있음 · 1 = 간접 근거만 · 0 = 근거 없음 또는 부정 진술",
     "파라미터 표": "판정 파라미터 — 위원 논의로 수정 가능",
     "문서 열람창": 'id="dv"',
     "방법론 코드 없음": None,
@@ -118,7 +119,7 @@ PANEL = {
 
 @pytest.mark.parametrize("name", sorted(PANEL))
 def test_track_b_panel_has_the_agreed_sections(name):
-    """1~3차 TF 가 요구한 것: 세 묶음 카드 · 능력단위 3점표 · 위원 판정 · 근거 체크 · 파라미터. R 코드는 안 보인다."""
+    """1~3차 TF 가 요구한 것: 세 묶음 카드 · 능력단위 3점표 · 위원 판정 · 파라미터, 4차 TF: 수행준거 점수. R 코드는 안 보인다."""
     from services.report import render_panel
     with session_scope() as s:
         aid = s.execute(text("SELECT id FROM assessment WHERE kind='evidence' ORDER BY id DESC LIMIT 1")).scalar()

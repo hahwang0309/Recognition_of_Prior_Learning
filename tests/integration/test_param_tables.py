@@ -90,10 +90,13 @@ def test_no_duplicate_rows(client, ids):
 
 
 def test_the_thresholds_match_what_the_screen_computes(client, ids):
-    """표의 값이 실제 판정 문턱과 같아야 한다 — 다르면 다른 것을 논의하게 된다."""
+    """표의 값이 실제 판정 문턱과 같아야 한다 — 다르면 다른 것을 논의하게 된다.
+
+    2026-10-02: Track B 는 수행준거 점수 규칙(모든 수행준거 ≥1 · 평균 ≥1.5 인정 · ≥1.0 보류)이다.
+    """
     from krpl_core.config import get_rubric
-    th = get_rubric().training_hours
-    hi, lo = f"{th['adjustment_floor']:.0%}", f"{th['hold_floor']:.0%}"
+    ur = get_rubric().track_b["unit_rule"]
+    acc, hold = f"{float(ur['accept_mean']):.1f}", f"{float(ur['hold_mean']):.1f}"
     for path in (f"/assessments/{ids['aid_b']}/panel", f"/assessments/{ids['aid_b']}/plan"):
         r = client.get(path)
         if r.status_code == 404:
@@ -101,4 +104,5 @@ def test_the_thresholds_match_what_the_screen_computes(client, ids):
         flat = " ".join(" ".join(x) for x in _rows(r.text))
         if not flat:
             continue                      # 제출 전 확인 계획 — 표가 없다
-        assert hi in flat and lo in flat, f"{path} 의 표가 문턱({hi}/{lo})을 말하지 않는다"
+        assert acc in flat and hold in flat and "0 인 수행준거" in flat, \
+            f"{path} 의 표가 문턱(평균 {acc}/{hold} · 0 없음)을 말하지 않는다"

@@ -112,17 +112,19 @@ def render_plan(s: Session, assessment_id: int) -> str:
             c = u_in.get("counts") or Counter(
                 it.get("method") for it in (u_in.get("items") or []) if it.get("method"))
             rows += (f"<tr><td>{e(u['name'])}</td><td class=n>{u['hours']}h</td>"
-                     f"<td class=n>{u['n_covered']}/{u['n_total']}</td>"
+                     f"<td class=n>{e(unit_count_text(u))}</td>"
                      f"<td class=src>{e(' · '.join(x['name'] for x in (u_in.get('open_elements') or [])) or '–')}</td>"
                      f"<td class=n>{u_in.get('n_uncovered', 0)}</td>"
                      f"<td class=src>시험 {c.get('시험', 0)} · 면접 {c.get('면접', 0)} · 실기 {c.get('시연·구현', 0)}</td></tr>")
+        is_pc = any(u.get("mean") is not None for u in hold)
         hold_html = f"""<section class="card"><header class="ch"><h2>보류 단위 {len(hold)}개 — 아래 방법으로 확인</h2>
-<p class="sub">서류만으로는 인정선에 못 미친 단위입니다. <b>이미 인정된 요소는 확인하지 않습니다</b> —
- 인정되지 못한 요소의 미확인 항목만 아래 방법으로 확인합니다.</p></header>
-<div class="tw"><table><thead><tr><th>능력단위</th><th>요구</th><th>인정 요소</th><th>확인 대상 요소</th><th>미확인 항목</th><th>확인 방법</th></tr></thead>
+<p class="sub">서류만으로는 인정선에 못 미친 단위입니다. {'<b>점수 2 인 수행준거는 확인하지 않습니다</b> — 점수 1(간접만)은 면접, 0(근거 없음)은 외부평가 실기로 확인합니다.' if is_pc else '<b>이미 인정된 요소는 확인하지 않습니다</b> — 인정되지 못한 요소의 미확인 항목만 아래 방법으로 확인합니다.'}</p></header>
+<div class="tw"><table><thead><tr><th>능력단위</th><th>요구</th><th>{'수행준거 점수' if is_pc else '인정 요소'}</th><th>확인 대상 요소</th><th>{'미확인 수행준거' if is_pc else '미확인 항목'}</th><th>확인 방법</th></tr></thead>
 <tbody>{rows}</tbody></table></div></section>"""
     else:
-        hold_html = "<section class='card'><p class='sub'>보류 단위가 없습니다. 인정 단위는 요구시간 전체를 인정하고, 불인정 단위는 훈련으로 이수합니다.</p></section>"
+        # 보류 0 — 확인 계획은 보류 단위만 대상이라 AI 문안도 없다. 4차 TF 에서 「API 가 안 도는 듯」 혼선이 있었다(의견 ④).
+        hold_html = ("<section class='card'><p class='sub'><b>보류 단위가 없어 AI 문안(시험·면접·실기)을 만들지 않았습니다.</b> "
+                     "확인 계획은 보류 단위만 대상입니다 — 인정 단위는 요구시간 전체를 인정하고, 불인정 단위는 훈련으로 이수합니다.</p></section>")
 
     # ── 3 시험 — 출제기준 표만 ──
     seen_ex, ex_rows = set(), ""
@@ -149,7 +151,7 @@ def render_plan(s: Session, assessment_id: int) -> str:
             know += (f"<p class='tgt'><b>{e(u['name'])}</b> · "
                      + " · ".join(f"{e(k)} 지식 {v}개" for k, v in by_el.items()) + "</p>")
 
-    exam_html = (f"""<section class="card"><header class="ch"><h2>1. 시험 — 지식 확인</h2>
+    exam_html = ("" if not hold else f"""<section class="card"><header class="ch"><h2>1. 시험 — 지식 확인</h2>
 <p class="sub">아래 출제기준으로 범위를 정하고 문항을 마련합니다. 필기 기출문제는 큐넷이 공개하지 않습니다(기술사만).</p></header>
 <div class="tw"><table class="ex"><thead><tr><th>시험</th><th>주관</th><th>범위</th><th>링크</th></tr></thead>
 <tbody>{ex_rows}</tbody></table></div>{know}</section>""" if ex_rows else
@@ -225,18 +227,20 @@ def render_plan(s: Session, assessment_id: int) -> str:
 
     errs = plan.get("ai_errors") or []
     usage = plan.get("usage") or {}
+    ur = rb.track_b.get("unit_rule") or {}
+    acc, hold_m = float(ur.get("accept_mean", 1.5)), float(ur.get("hold_mean", 1.0))
     params = [
-        ("요소 인정", "한 요소 안에서 인정된 항목이 50% 이상이면 그 요소를 인정합니다",
-         "2026-09-24 결정 — Track A 인정선과 같은 값", False),
-        ("능력단위 판정", "인정된 요소가 50% 이상이면 인정 · 30% 이상이면 보류 · 그 미만은 불인정",
-         "2026-09-24 결정", True),
-        ("확인 대상", "보류 단위 가운데 인정되지 못한 요소만 봅니다. 이미 인정된 요소는 확인하지 않습니다",
-         "2026-09-24 설계", True),
-        ("인정되면 몇 시간", "그 능력단위의 요구시간 전체. 요소·항목에는 시간이 매겨져 있지 않습니다",
+        ("수행준거 점수", "2 = 직접 근거 1건 이상 · 1 = 간접 근거만 · 0 = 근거 없음 또는 부정 진술. 위원이 고치면 위원 값이 우선",
+         "4차 TF(2026-09-30) 합의 · 2026-10-02 존재 기준", True),
+        ("능력단위 판정", f"0 인 수행준거가 하나라도 있으면 불인정 · 전부 1 이상이고 평균 {acc:.1f} 이상이면 인정 · 평균 {hold_m:.1f} 이상이면 보류",
+         "4차 TF 직후 합의 — 출발값", pending(rb, "track_b.unit_rule.accept_mean")),
+        ("확인 대상", "보류 단위 가운데 점수가 2 가 아닌 수행준거만 봅니다. 제출할 때 포함할 보류 단위를 고를 수 있습니다",
+         "2026-10-02 설계 · 4차 TF 의견 14", True),
+        ("인정되면 몇 시간", "그 능력단위의 요구시간 전체. 수행준거에는 시간이 매겨져 있지 않습니다",
          "NCS 원자료 확인 · 설계안", False),
         ("무엇을 무엇으로 확인하나",
-         "지식은 시험(그 분야 시험이 없으면 면접) · 기술은 외부평가 대면 실기 · 태도는 면접",
-         "2026-09-24 설계", True),
+         "점수 0(근거 없음)은 외부평가 대면 실기 · 점수 1(간접만)은 면접 · 분야에 등록된 시험이 있으면 지식 확인용으로 안내",
+         "2026-10-02 설계", True),
         ("시험 문항",
          "출제기준으로 범위만 정합니다. 기능사·산업기사·기사 필기 기출문제는 공개되지 않아(기술사만) "
          "문항은 따로 마련해야 합니다",

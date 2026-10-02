@@ -103,18 +103,24 @@ def test_the_plan_page_is_the_last_word(client, case):
         assert word in plan.text, f"확인 계획이 「{word}」을 말하지 않는다"
 
 
-def test_the_unit_verdict_counts_elements_not_items(client, case):
-    """두 단계 게이트 — 세는 것은 요소다."""
+def test_the_unit_verdict_counts_performance_criteria(client, case):
+    """신형(2026-10-02) — 세는 것은 수행준거다. n_total = 그 단위 요소들의 수행준거 수, n_covered = 점수 ≥1."""
     with session_scope() as s:
         units = unit_verdicts(s, case["ev"])
-        els = {u["code"]: s.execute(text("""SELECT count(*) FROM assessment_element
-            WHERE assessment_id=:a AND element_id LIKE :p"""),
-            {"a": case["ev"], "p": u["code"] + "%"}).scalar_one() for u in units}
+        pcs = {u["code"]: s.execute(text("""SELECT count(*) FROM catalog_ncs_pc p
+            WHERE p.unit_code=:c AND EXISTS (SELECT 1 FROM assessment_element x
+                WHERE x.assessment_id=:a AND x.element_id LIKE :p
+                  AND split_part(x.element_id, '.', 2)::int = p.element_no)"""),
+            {"a": case["ev"], "c": u["code"], "p": u["code"] + "%"}).scalar_one() for u in units}
     assert units
     for u in units:
-        assert u["n_total"] == els[u["code"]], f"{u['name']}: n_total 이 요소 수가 아니다"
-        assert u["n_covered"] <= u["n_total"]
-        assert u["ratio"] == pytest.approx(u["n_covered"] / u["n_total"]) if u["n_total"] else True
+        assert u["format"] == "pc"
+        assert u["n_total"] == pcs[u["code"]], f"{u['name']}: n_total 이 수행준거 수가 아니다"
+        assert 0 <= u["n_covered"] <= u["n_total"] and 0 <= u["mean"] <= 2
+        assert u["ratio"] == pytest.approx(u["mean"] / 2)
+        assert u["verdict"] in ("인정", "보류", "불인정")
+        if u["n_zero"]:
+            assert u["verdict"] == "불인정", "0 인 수행준거가 있으면 불인정"
 
 
 def test_track_a_screens_keep_their_own_bar(client, case):

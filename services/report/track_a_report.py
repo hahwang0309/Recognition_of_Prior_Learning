@@ -26,7 +26,7 @@ from krpl_core.config import get_rubric
 from services.report._shared import STEP_CSS, TRACK_CSS, step_head, step_nav, track_chip, STEP_CSS, step_head
 from services.report.doc_viewer import (VIEWER_CSS, VIEWER_HTML, VIEWER_JS,
                                         js_literal, viewer_data)
-from services.review.unit_hours import evidence_aid, unit_evidence, unit_gaps
+from services.review.unit_hours import evidence_aid, unit_evidence, unit_gaps, unit_pc_scores
 
 e = lambda x: html.escape(str(x) if x is not None else "")   # noqa: E731
 
@@ -151,6 +151,10 @@ def _basis(evidence: list[dict]) -> str:
 
 
 GAP_CSS = """
+.pcsum{font-size:12.5px;margin:6px 0 4px;color:var(--ts)}.pcsum small{color:var(--tm)}
+table.pct td,table.pct th{white-space:normal;vertical-align:top;font-size:12px}
+table.pct .b{display:inline-block;min-width:22px;text-align:center;border-radius:6px;padding:0 6px;font-weight:700;color:#fff}
+table.pct .b.good{background:var(--good)}table.pct .b.hold{background:var(--hold)}table.pct .b.crit{background:var(--crit)}
 .gap-tbl td{vertical-align:top}
 .gap-tbl details summary{cursor:pointer;white-space:normal}
 .gap-tbl details summary .mini{display:block;color:var(--tm);font-size:11.5px;font-weight:400}
@@ -278,6 +282,7 @@ def render_track_a(s: Session, assessment_id: int, *, editable: bool = True, rea
 
     gaps = unit_gaps(s, assessment_id)
     ev_by_unit = unit_evidence(s, sid, [g.unit_code for g in gaps])
+    pc_by_unit = unit_pc_scores(s, sid, [g.unit_code for g in gaps])
     fr_json, dn_json = viewer_data(s, sid)
     fid_meta = {f["fid"]: (f["name"], f["grade"]) for f in fr_json}
     has_ev = evidence_aid(s, sid) is not None
@@ -313,7 +318,25 @@ def render_track_a(s: Session, assessment_id: int, *, editable: bool = True, rea
         head = (f'<p class="none">근거 {len(items)}건'
                 + (f' · <b>부정 진술 {n_neg}건</b> — 먼저 보십시오' if n_neg else '')
                 + '</p>')
-        return head + out
+        return _pc_table(code) + head + out
+
+    def _pc_table(code: str) -> str:
+        """수행준거 점수표 — 시간을 몇 시간 더 줄지 정할 때 보는 참고값(2026-10-02). 판정은 여전히 50% 게이트."""
+        d = pc_by_unit.get(code) or {}
+        rows = d.get("rows") or []
+        if not rows:
+            return ('<p class="none">옛 형식 근거 분석 — 수행준거 점수는 다시 분석해야 나옵니다.</p>'
+                    if d.get("format") == "ksa" else "")
+        trs = ""
+        for r in rows:
+            cls = {2: "good", 1: "hold", 0: "crit"}[int(r["score"])]
+            src = {"reviewer": "위원", "rule": "기록", "ai": "AI"}.get(r["src"], "AI")
+            trs += (f'<tr><td class="c"><span class="b {cls}">{r["score"]}</span> <small>{e(src)}</small></td>'
+                    f'<td>{e(r["text"])}</td><td><small>{e(r["element"])}</small></td></tr>')
+        return (f'<div class="pcsum">수행준거 {d["n_nonzero"]}/{d["n_pc"]} ≥1 · 평균 {d["mean"]:.2f} '
+                f'<small>(2 = 직접 근거 · 1 = 간접만 · 0 = 없음·부정 — 참고값, 시간 입력이 판정)</small></div>'
+                f'<div class="tw"><table class="pct"><thead><tr><th style="width:90px">점수</th><th>수행준거</th><th style="width:28%">요소</th></tr></thead>'
+                f'<tbody>{trs}</tbody></table></div>')
 
     gap_sec = ""
     if gaps:

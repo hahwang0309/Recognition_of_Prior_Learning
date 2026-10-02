@@ -72,10 +72,10 @@ def test_package_matches_catalog():
     assert u["required_hours"] == 70
     e = u["elements"][0]
     assert e["element_id"] == "1601050111_21v3.1"
-    # KSA 는 수행준거마다 반복 수록된다 — 중복이 걷혔는지
-    assert [k["ref"] for k in e["ksa"]] == [
-        "기술1", "기술2", "기술3", "지식1", "지식2", "지식3", "지식4", "태도1", "태도2", "태도3"]
-    assert len(e["performance_criteria"]) == 4
+    # 2026-10-02: AI 입력은 수행준거뿐이다(KSA 없음). 「준거n」 번호가 pc_no 순으로 붙는다.
+    assert "ksa" not in e
+    assert [p["ref"] for p in e["performance_criteria"]] == ["준거1", "준거2", "준거3", "준거4"]
+    assert all(p["text"] for p in e["performance_criteria"])
 
 
 def test_package_hash_is_stable():
@@ -218,10 +218,10 @@ def _break(out: dict) -> dict:
     bad = copy.deepcopy(out)
     bad["elements"][0]["evidence"][0]["fids"] = ["D99-S99"]
     next(e for e in bad["elements"] if e["evidence"])["source_grades"] = ["A", "C", "D"]
-    # KSA 전수 배정은 R0 요소에서는 검사하지 않는다 — 보완이 필요한 요소를 골라 지운다
+    # 수행준거 전수 배정은 R0 요소에서는 검사하지 않는다 — 보완이 필요한 요소를 골라 지운다
     victim = next(e for e in bad["elements"]
-                  if e["recommendation"] != "R0" and e["uncovered_ksa"])
-    victim["uncovered_ksa"], victim["remediation"] = [], []
+                  if e["recommendation"] != "R0" and e["uncovered_pc"])
+    victim["uncovered_pc"], victim["remediation"] = [], []
     return bad
 
 

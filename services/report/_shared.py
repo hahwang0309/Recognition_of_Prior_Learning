@@ -190,3 +190,26 @@ def unit_count_text(u: dict) -> str:
     if u.get("mean") is not None and u.get("format", "pc") != "ksa":
         return f"수행준거 {u.get('n_covered', 0)}/{u.get('n_total', 0)} ≥1 · 평균 {u['mean']:.2f}"
     return f"요소 {u.get('n_covered', 0)}/{u.get('n_total', 0)} 인정"
+
+
+# 근거를 보이는 순서 — 공신력 높은 자료가 위로 (4차 TF 의견 9, 2026-10-02).
+# 등급(A→E)이 먼저, 같은 등급 안에서는 이 순서, 그 다음 적합도(직접→간접→부정).
+DOC_PRIORITY = [
+    "국가기술자격증", "직무능력인정서", "사업주자격증_정부인정",
+    "학위·성적증명서", "4대보험_가입내역",
+    "NCS기반_훈련이수증", "교육과정_편성표",
+    "사내·기관_교육이수내역", "강의계획서", "비NCS_교육수료증", "경력증명서", "사업주자격증",
+    "포트폴리오·산출물", "작업일지·업무일지",
+    "제3자_확인서",
+    "경력기술서·자기소개서",
+    "기타",
+]
+GRADE_RANK = {g: i for i, g in enumerate("ABCDE")}
+FIT_RANK = {"직접": 0, "간접": 1, "부정": 2}
+
+
+def evidence_sort_key(grade: str | None, doc_type: str | None, fit: str | None) -> tuple:
+    """정렬 열쇠. 모르는 등급·종류·적합도는 맨 뒤."""
+    return (GRADE_RANK.get((grade or "").upper()[:1], 9),
+            DOC_PRIORITY.index(doc_type) if doc_type in DOC_PRIORITY else len(DOC_PRIORITY),
+            FIT_RANK.get(fit or "직접", 9))

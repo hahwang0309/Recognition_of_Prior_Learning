@@ -68,9 +68,9 @@ def test_every_reference_resolves_to_a_label(payloads):
     missing = []
     for x in payloads:
         p = x["payload"]
-        refs = [v.get("ksa_ref") for v in (p.get("evidence") or [])]
+        refs = [v.get("pc_ref") or v.get("ksa_ref") for v in (p.get("evidence") or [])]
         refs += [(u.get("ref") if isinstance(u, dict) else u)
-                 for u in (p.get("uncovered_ksa") or [])]
+                 for u in (p.get("uncovered_pc") or p.get("uncovered_ksa") or [])]
         for r in filter(None, refs):
             if not label_of(lab, x["element_id"], r):
                 missing.append((x["element_id"], r))
@@ -87,27 +87,26 @@ def test_labels_appear_on_screen(page, payloads):
 
 
 def test_bare_reference_never_stands_alone(page):
-    """「기술1 · 미확보」처럼 번호만 적힌 자리가 남아 있으면 안 된다."""
-    assert not re.search(r"(기술|지식|태도)\d+\s*·\s*(미확보|부정진술)", page)
+    """「준거1 · 미확보」처럼 번호만 적힌 자리가 남아 있으면 안 된다."""
+    assert not re.search(r"(기술|지식|태도|준거)\d+\s*·\s*(미확보|부정진술)", page)
 
 
 def test_reference_is_spaced_for_reading(page):
-    assert ('<span class="ref">기술 1</span>' in page
-            or '<span class="ref">지식 1</span>' in page)
-    assert pretty_ref("기술1") == "기술 1"
+    assert '<span class="ref">준거 1</span>' in page
+    assert pretty_ref("기술1") == "기술 1" and pretty_ref("준거2") == "준거 2"
 
 
 # ── 표 ────────────────────────────────────────────────────────────
 
 def test_evidence_is_a_table(page):
-    assert "<th>KSA</th><th>근거 인용문</th><th>자료</th><th>원문</th>" in page
+    assert "<th>수행준거</th><th>근거 인용문</th><th>자료</th><th>원문</th>" in page
 
 
 def test_uncovered_is_a_table_with_reasons(page, payloads):
-    assert "<th>KSA</th><th>왜 비어 있나</th><th>구분</th>" in page
+    assert "<th>수행준거</th><th>왜 비어 있나</th><th>구분</th>" in page
     # AI 가 남긴 「왜 비었나」를 버리지 않는다 — 예전에는 통째로 사라졌다
     notes = [u.get("note") for x in payloads
-             for u in (x["payload"].get("uncovered_ksa") or [])
+             for u in (x["payload"].get("uncovered_pc") or x["payload"].get("uncovered_ksa") or [])
              if isinstance(u, dict) and u.get("note")]
     assert notes, "대조할 note 가 없다"
     assert sum(1 for n in set(notes) if n in page) >= 3, "미확보 사유가 화면에 없다"

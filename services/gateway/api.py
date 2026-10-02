@@ -26,7 +26,7 @@ from services.report import (
 )
 from services.review import (
     receive_document, record_decision, review_summary, save_element_review,
-    save_result, set_stage,
+    save_pc_score, save_result, set_stage,
 )
 from services.review.plan import submit as plan_submit
 from services.review.unit_hours import evidence_aid, save_unit_hours, unit_gaps
@@ -38,7 +38,7 @@ from services.review import load as review_ctx
 from services.gateway.schemas import (
     AssessmentOut, AssessmentStatus, AssessRequest, BulkReviewIn, DecisionIn,
     DecisionOut,
-    ElementOut, ElementReviewIn, ElementReviewOut, FragmentOut, IngestOut,
+    ElementOut, ElementReviewIn, PcScoreIn, ElementReviewOut, FragmentOut, IngestOut,
     IngestRequest, ProgramOut, RecommendOut, ReviewSummaryOut, SubmissionCreate,
     GuessIn, GuessOut, RemoveIn, UnitHoursIn,
     RemediationIn, RemediationOut,
@@ -317,11 +317,30 @@ def panel(aid: int, ro: int = 0, s: Session = Depends(get_session)):
 
 
 @app.post("/assessments/{aid}/panel/submit")
-def panel_submit(aid: int, reviewer: str | None = Form(None), s: Session = Depends(get_session)):
-    """위원 판정 제출 → 단위 판정 스냅샷 + 보류 단위 확인 계획(AI 1회) → 계획 페이지로."""
+def panel_submit(aid: int, reviewer: str | None = Form(None),
+                 plan_units: list[str] = Form([]), plan_units_sent: str | None = Form(None),
+                 s: Session = Depends(get_session)):
+    """위원 판정 제출 → 단위 판정 스냅샷 + 보류 단위 확인 계획(AI 1회) → 계획 페이지로.
+
+    `plan_units` — 위원이 「확인 계획에 포함」으로 고른 보류 단위(4차 TF 의견 14). 폼에 그 칸이
+    있었다는 표시(`plan_units_sent`)가 없으면 예전 폼이므로 보류 단위 전부를 넣는다.
+    """
     _need_assessment(s, aid)
-    plan_submit(s, aid, reviewer or None)
+    only = list(plan_units) if plan_units_sent else None
+    plan_submit(s, aid, reviewer or None, only_codes=only)
     return RedirectResponse(f"/assessments/{aid}/plan", status_code=303)
+
+
+@app.post("/assessments/{aid}/elements/{element_id}/pc")
+def save_pc(aid: int, element_id: str, body: PcScoreIn, s: Session = Depends(get_session)):
+    """수행준거 점수 저장(신형). 응답에 서버가 다시 센 단위 판정이 실린다 — 화면은 그 값으로 다시 그린다."""
+    _need_assessment(s, aid)
+    try:
+        return save_pc_score(s, aid, element_id, body.ref, body.score, body.reviewer)
+    except LookupError as ex:
+        raise HTTPException(404, str(ex)) from ex
+    except ValueError as ex:
+        raise HTTPException(422, str(ex)) from ex
 
 
 @app.get("/assessments/{aid}/plan", response_class=HTMLResponse)

@@ -270,7 +270,8 @@ def test_reports_avoid_internal_jargon(client, sid):
             continue
         h = r.text
         for bad in ("track_a", "track_b", "needs_expert_review", "decided_by",
-                    "uncovered_ksa", "qualitative_note", "HILM", "submission_id"):
+                    "uncovered_ksa", "uncovered_pc", "pc_ref", "pc_refs",
+                    "qualitative_note", "HILM", "submission_id"):
             assert bad not in h, f"{path} 에 내부 이름 노출: {bad}"
 
 

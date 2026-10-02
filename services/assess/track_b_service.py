@@ -324,14 +324,22 @@ def _carry_review(s: Session, old_aid: int, new_aid: int,
     보완 항목 결과는 전부 옮긴다 — 열쇠가 항목 글의 해시라, 같은 항목이면
     같은 열쇠다. 새 판정에 없어진 항목의 결과는 그냥 쓰이지 않는다.
     """
-    n1 = s.execute(text("""
-        INSERT INTO element_review (assessment_id, element_id, decision,
-                                    ai_recommendation, note, reviewer, reviewed_at)
-        SELECT :new, element_id, decision, ai_recommendation, note, reviewer, reviewed_at
-        FROM element_review WHERE assessment_id=:old
-          AND NOT (element_id = ANY(:redo))
-        ON CONFLICT (assessment_id, element_id) DO NOTHING"""),
-        {"new": new_aid, "old": old_aid, "redo": sorted(redo)}).rowcount
+    # 위원 표시(excluded_evidence)는 수행준거 점수 "pc:…" 만 옮긴다. 구형(항목 단위)의 fid 제외·add:
+    # 표시는 새 판정의 참조와 맞지 않으므로 버린다(2026-10-02). 수행준거 번호는 카탈로그 순서라 안정적이다.
+    rows = s.execute(text("""
+        SELECT element_id, decision, ai_recommendation, note, reviewer, reviewed_at, excluded_evidence
+        FROM element_review WHERE assessment_id=:old AND NOT (element_id = ANY(:redo))"""),
+        {"old": old_aid, "redo": sorted(redo)}).all()
+    n1 = 0
+    for eid, dec, rec, note, who, at, marks in rows:
+        keep = [m for m in (marks or []) if isinstance(m, str) and m.startswith("pc:")]
+        n1 += s.execute(text("""
+            INSERT INTO element_review (assessment_id, element_id, decision, ai_recommendation,
+                                        note, reviewer, reviewed_at, excluded_evidence)
+            VALUES (:new, :e, :d, :r, :n, :w, :t, CAST(:x AS jsonb))
+            ON CONFLICT (assessment_id, element_id) DO NOTHING"""),
+            {"new": new_aid, "e": eid, "d": dec, "r": rec, "n": note, "w": who, "t": at,
+             "x": json.dumps(keep)}).rowcount
     n2 = s.execute(text("""
         INSERT INTO remediation_result (assessment_id, item_key, method, item,
                                         result, note, decided_by, decided_at)
@@ -350,6 +358,11 @@ def _store(s: Session, aid: int, out: dict, rep: ValidationReport) -> None:
         _normalize_conflicts(el)
         payload = dict(el)
         payload["needs_expert_review"] = el["element_id"] in warned
+        # 형식 표시 — 신형(수행준거) 요소는 schema:"pc". 근거가 없는 R5 요소도 이 표시로 구분한다(2026-10-02).
+        if payload.get("schema") != "pc" and (
+                any(isinstance(ev, dict) and ev.get("pc_ref") for ev in (el.get("evidence") or []))
+                or "uncovered_pc" in el):
+            payload["schema"] = "pc"
         rows.append({"a": aid, "e": el["element_id"],
                      "r": el.get("recommendation") or "?",
                      "v": el.get("evidence_level"), "m": el.get("verification_method"),

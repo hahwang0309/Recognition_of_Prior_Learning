@@ -7,7 +7,8 @@
   documents       제출 자료 목록 (유형·신뢰도등급·발급처)
   fragments       자료를 쪼갠 조각. AI 인용의 유일한 단위
   prior_learning  기이수 능력단위 (Track A 방식으로 대조할 대상)
-  ncs             목표 종목이 요구하는 능력단위 → 요소 → 수행준거 → KSA
+  ncs             목표 종목이 요구하는 능력단위 → 요소 → 수행준거 (「준거n」 번호)
+                  2026-10-02: KSA 는 AI 입력에서 뺐다 — 근거 수집은 수행준거 문장에만 맨다(4차 TF).
 """
 from __future__ import annotations
 
@@ -48,14 +49,6 @@ def _units(s: Session, program_id: str) -> list[dict]:
         WHERE unit_code = ANY(:c) ORDER BY unit_code, element_no, pc_no"""), {"c": codes}):
         pcs.setdefault((uc, en), []).append({"ref": f"준거{no}", "text": txt})
 
-    # KSA 는 수행준거마다 반복 수록된다. (유형, 번호) 로 중복을 걷어낸다.
-    ksa: dict[tuple[str, int], dict[str, str]] = {}
-    for uc, en, kt, kn, txt in s.execute(text("""
-        SELECT unit_code, element_no, ksa_type, ksa_no, ksa_text FROM catalog_ncs_ksa
-        WHERE unit_code = ANY(:c) ORDER BY unit_code, element_no, ksa_type, ksa_no"""),
-        {"c": codes}):
-        ksa.setdefault((uc, en), {}).setdefault(f"{kt}{kn}", txt)
-
     out = []
     for r in req:
         uc = r["unit_code"]
@@ -66,9 +59,6 @@ def _units(s: Session, program_id: str) -> list[dict]:
             "elements": [{
                 "element_id": e["element_id"], "element_name": e["element_name"],
                 "performance_criteria": pcs.get((uc, e["element_no"]), []),
-                "ksa": [{"ref": k, "text": v}
-                        for k, v in sorted(ksa.get((uc, e["element_no"]), {}).items(),
-                                           key=lambda x: (x[0][:2], int(x[0][2:])))],
             } for e in els.get(uc, [])],
         })
     return out

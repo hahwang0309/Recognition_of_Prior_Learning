@@ -2,7 +2,7 @@ from services.review.context import HourSplit, ReviewContext, load, set_stage
 from services.review.receive import Received, receive_document
 from services.review.close import Closed, close, preview, DEFAULT_OF
 from services.review.service import (
-    ReviewSummary, UnitRoll, record_decision, review_summary, save_element_review,
+    ReviewSummary, UnitRoll, record_decision, review_summary, save_element_review, save_pc_score,
 )
 from services.review.stages import (
     KEY_OF, METHOD_OF_STAGE, RESULTS, STAGES, STAGE_OF, TITLE_OF, UNFILLED,
@@ -14,7 +14,7 @@ from services.review.triage import (
     BUCKETS, JUDGE, LOOK, SETTLED, bucket, counts, needs_judgment, split,
 )
 
-__all__ = ["review_summary", "save_element_review", "record_decision",
+__all__ = ["review_summary", "save_element_review", "save_pc_score", "record_decision",
            "ReviewSummary", "UnitRoll",
            "bucket", "needs_judgment", "split", "counts",
            "BUCKETS", "LOOK", "JUDGE", "SETTLED",

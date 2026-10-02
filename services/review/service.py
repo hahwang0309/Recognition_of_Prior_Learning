@@ -342,3 +342,49 @@ def record_decision(s: Session, assessment_id: int, decision: str,
     return {"submission_id": sid, "assessment_id": assessment_id, "decision": decision,
             "recognized_hours": hours, "total_hours": sm.total_hours,
             "credit_basis": basis, "reason": reason, "decided_by": decided_by}
+
+
+def save_pc_score(s: Session, assessment_id: int, element_id: str, ref: str, score: int,
+                  reviewer: str | None = None) -> dict[str, Any]:
+    """위원이 수행준거 점수를 고친다 (신형, 2026-10-02). 돌려주는 것은 **저장 뒤 서버가 다시 센 단위 결과**다.
+
+    화면이 자기 계산을 믿고 그리면 서버와 갈라진다(2026-09-28 사고). 그래서 응답에 단위 판정을
+    담아 화면이 그 값으로 다시 그리게 한다. AI 값과 같은 점수를 고르면 위원 표시를 지운다.
+    표시는 요소의 excluded_evidence 에 "pc:<ref>=<n>" 으로 쌓인다(수행준거 번호는 요소마다 다시 시작).
+    """
+    from services.catalog.ncs_struct import element_no, ksa_of, pcs_of, unit_of
+    from services.review.coverage import PC, element_scores, unit_verdict_of
+    rb = get_rubric()
+    sc = (rb.track_b.get("pc_scoring") or {})
+    if score not in (sc.get("values") or [0, 1, 2]):
+        raise ValueError(f"점수 값이 잘못됨: {score} (가능: {sc.get('values') or [0, 1, 2]})")
+    uc = unit_of(element_id)
+    pcs = pcs_of(s, [uc]).get((uc, element_no(element_id) or 0), [])
+    if ref not in {p["ref"] for p in pcs}:
+        raise LookupError(f"해당 수행준거가 없습니다: {element_id} {ref}")
+    row = s.execute(text("""SELECT payload FROM assessment_element
+                            WHERE assessment_id=:a AND element_id=:e"""),
+                    {"a": assessment_id, "e": element_id}).scalar()
+    if row is None:
+        raise LookupError(f"해당 요소가 없습니다: {element_id}")
+    old = list(s.execute(text("""SELECT excluded_evidence FROM element_review
+                                 WHERE assessment_id=:a AND element_id=:e"""),
+                         {"a": assessment_id, "e": element_id}).scalar() or [])
+    marks = [m for m in old if not (isinstance(m, str) and m.startswith(f"{PC}{ref}="))]
+    ai = next((r for r in element_scores(row, pcs, (), rb) if r["ref"] == ref), None)
+    ai_score = ai["score"] if ai else 0
+    if score != ai_score:
+        marks.append(f"{PC}{ref}={score}")
+    # 단위 판정은 그 단위의 요소 전부로 다시 센다
+    xs = [dict(r) for r in s.execute(text("""SELECT element_id, payload FROM assessment_element
+        WHERE assessment_id=:a AND element_id LIKE :p"""), {"a": assessment_id, "p": uc + "\\_%"}).mappings()]
+    marks_of = {r[0]: list(r[1] or []) for r in s.execute(text("""SELECT element_id, excluded_evidence
+        FROM element_review WHERE assessment_id=:a"""), {"a": assessment_id})}
+    marks_of[element_id] = marks
+    ksa_all = {k: [r for r, _ in v] for k, v in ksa_of(s, [uc]).items()}
+    unit = unit_verdict_of(xs, rb, marks_of, uc, ksa_all, pcs_of(s, [uc]), lambda e: element_no(e) or 0)
+    save_element_review(s, assessment_id, element_id, unit["verdict"], None, reviewer, marks)
+    unit.pop("scores", None)
+    return {"element_id": element_id, "ref": ref, "score": score,
+            "src": "reviewer" if score != ai_score else ("rule" if ai and ai["src"] == "rule" else "ai"),
+            "ai_score": ai_score, "unit_code": uc, "unit": unit}

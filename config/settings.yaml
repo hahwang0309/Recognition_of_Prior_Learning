@@ -9,7 +9,7 @@ rubric:
   fail_on_pending: false             # true 면 미확정 항목이 있을 때 기동 거부
 
 prompt:
-  trackb_version: trackb_v5          # config/prompts/{version}.md
+  trackb_version: trackb_v6          # config/prompts/{version}.md — v6: 수행준거 단위 (2026-10-02)
 
 storage:
   backend: local                     # local | s3

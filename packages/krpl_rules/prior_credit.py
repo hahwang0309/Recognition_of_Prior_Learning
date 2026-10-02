@@ -176,7 +176,8 @@ def make_element(package: dict, element: dict, credit: PriorCredit,
     quote = (frag["text"] if frag else credit.source_text)[:300]
     ev_grade = frag["grade"] if frag else credit.grade
     pb_fids, pb_grades, pb_note = period
-    ref = (element["ksa"][0]["ref"] if element.get("ksa") else "기술1")
+    # 2026-10-02: 수행준거마다 직접 근거 1건 — 기이수 요소는 전부 2점. 수행준거가 없으면(카탈로그 구멍) 준거1 하나.
+    pc_refs = [p["ref"] for p in (element.get("performance_criteria") or []) if isinstance(p, dict) and p.get("ref")] or ["준거1"]
 
     proves = (rubric.document_types.get("NCS기반_훈련이수증") or {}).get("proves") or {}
     proven = [d for d, v in proves.items() if v == "full"]
@@ -186,15 +187,16 @@ def make_element(package: dict, element: dict, credit: PriorCredit,
         "element_id": element["element_id"],
         "element_name": element.get("element_name"),
         "unit_name": credit.unit_name,
+        "schema": "pc",
         "evidence": [{
-            "ksa_ref": ref,
+            "pc_ref": ref,
             "fids": [credit.fid],
             "grade": ev_grade,
             "fit": "직접",          # NCS 기반 훈련 이수증은 국가 기준 평가를 마친 자료 — 직접 근거 (2026-09-24)
             "quote": quote,
             "why": (f"{credit.unit_name} 능력단위를 {credit.hours_note}하고 "
                     f"내부평가 {credit.evaluation} 기록이 이수증에 있다."),
-        }],
+        } for ref in pc_refs],
         "period_backing": {"fids": pb_fids, "grades": pb_grades, "note": pb_note},
         "prior_learning": {
             "applies": True, "unit_code": credit.unit_code,
@@ -203,7 +205,7 @@ def make_element(package: dict, element: dict, credit: PriorCredit,
             "evaluation": credit.evaluation, "fid": credit.fid,
             "reason": "이수증에 능력단위코드·이수시간·내부평가 결과가 모두 적혀 있다.",
         },
-        "uncovered_ksa": [],
+        "uncovered_pc": [],
         "remediation": [],
         "negative_statements": [],
         "evidence_level": "충분",

@@ -156,6 +156,46 @@ def evidence_aid(s: Session, submission_id: int) -> int | None:
            ORDER BY a.id DESC LIMIT 1"""), {"i": submission_id}).scalar()
 
 
+def unit_pc_scores(s: Session, submission_id: int,
+                   unit_codes: Iterable[str]) -> dict[str, dict[str, Any]]:
+    """능력단위별 수행준거 점수표 (신형 근거 분석, 2026-10-02) — Track A 전문가 검토의 **참고값**.
+
+    {unit_code: {"mean": 1.4, "n_pc": 9, "n_nonzero": 7, "rows": [{eid, element, ref, text, score, src}], "format": "pc"}}.
+    구형 판정이면 {"format": "ksa"} 만. 시간 입력·50% 게이트는 그대로다(2026-10-02 사용자 결정).
+    """
+    from services.catalog.ncs_struct import element_no, pcs_of, unit_of
+    from services.review.coverage import element_scores, is_pc_format
+    from krpl_core.config import get_rubric
+    codes = list(dict.fromkeys(unit_codes))
+    out: dict[str, dict[str, Any]] = {c: {"format": "none", "rows": []} for c in codes}
+    aid = evidence_aid(s, submission_id)
+    if aid is None or not codes:
+        return out
+    rb = get_rubric()
+    pc_all = pcs_of(s, codes)
+    marks = {r[0]: list(r[1] or []) for r in s.execute(text(
+        "SELECT element_id, excluded_evidence FROM element_review WHERE assessment_id=:a"), {"a": aid})}
+    for eid, payload in s.execute(text(
+            """SELECT element_id, payload FROM assessment_element
+               WHERE assessment_id=:a ORDER BY element_id"""), {"a": aid}):
+        code = unit_of(eid)
+        if code not in out:
+            continue
+        p = payload or {}
+        if not is_pc_format(p):
+            out[code]["format"] = "ksa"
+            continue
+        out[code]["format"] = "pc" if out[code]["format"] in ("none", "pc") else "mixed"
+        for r in element_scores(p, pc_all.get((code, element_no(eid) or 0), []), marks.get(eid, []), rb):
+            out[code]["rows"].append({"eid": eid, "element": p.get("element_name") or eid, **r})
+    for code, d in out.items():
+        rows = d["rows"]
+        d["n_pc"] = len(rows)
+        d["n_nonzero"] = sum(1 for r in rows if r["score"] >= 1)
+        d["mean"] = round(sum(r["score"] for r in rows) / len(rows), 2) if rows else 0.0
+    return out
+
+
 def unit_evidence(s: Session, submission_id: int,
                   unit_codes: Iterable[str]) -> dict[str, list[dict[str, Any]]]:
     """능력단위별로 근거 분석이 뽑아 둔 조각을 모은다.

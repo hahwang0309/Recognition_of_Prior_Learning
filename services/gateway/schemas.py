@@ -191,6 +191,13 @@ class UnitHoursIn(BaseModel):
     reviewer: str | None = None
 
 
+class PcScoreIn(BaseModel):
+    """위원이 고친 수행준거 점수 (신형, 2026-10-02). `{ref: "준거3", score: 1}`."""
+    ref: str
+    score: int
+    reviewer: str | None = None
+
+
 class BulkReviewIn(BaseModel):
     """여러 요소에 같은 의견을 한 번에. 「코드가 확정한 12개 전부 인정」 같은 경우."""
     element_ids: list[str] = Field(min_length=1, max_length=500)
