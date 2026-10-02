@@ -180,3 +180,13 @@ def step_nav(submission_id: int, time_aid: int | None, has_evidence: bool,
         "review": f"/assessments/{time_aid}/review" if time_aid else None,
         "final": f"/assessments/{time_aid}/exemption" if time_aid else None,
     }
+
+
+def unit_count_text(u: dict) -> str:
+    """단위 판정 dict → 「수행준거 7/9 ≥1 · 평균 1.6」(신형) / 「요소 2/3 인정」(구형).
+
+    unit_verdicts·plan 스냅샷·계획 artifact 가 같은 dict 모양을 쓴다. 신형은 `mean` 이 있다.
+    """
+    if u.get("mean") is not None and u.get("format", "pc") != "ksa":
+        return f"수행준거 {u.get('n_covered', 0)}/{u.get('n_total', 0)} ≥1 · 평균 {u['mean']:.2f}"
+    return f"요소 {u.get('n_covered', 0)}/{u.get('n_total', 0)} 인정"

@@ -19,8 +19,8 @@ import re
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-# AI 가 내놓는 참조 형식. 「기술1」·「지식12」·「태도3」.
-REF = re.compile(r"^\s*(기술|지식|태도)\s*(\d+)\s*$")
+# AI 가 내놓는 참조 형식. 「기술1」·「지식12」·「태도3」 — 2026-10-02 부터 「준거1」(수행준거)도.
+REF = re.compile(r"^\s*(기술|지식|태도|준거)\s*(\d+)\s*$")
 
 
 def parse_ref(ref: str) -> tuple[str, int] | None:
@@ -55,6 +55,13 @@ def labels(s: Session, element_ids: list[str]) -> dict[tuple[str, str], str]:
     by_unit: dict[tuple[str, int], dict[str, str]] = {}
     for unit, no, typ, num, txt in rows:
         by_unit.setdefault((unit, no), {})[f"{typ}{num}"] = txt
+    # 수행준거 「준거n」 — 신형(2026-10-02) 판정의 참조 단위. 같은 사전에 넣어 label_of 가 한 길로 찾게 한다.
+    for unit, no, num, txt in s.execute(text("""
+        SELECT unit_code, element_no, pc_no, pc_text FROM catalog_ncs_pc
+        WHERE (unit_code, element_no) IN (
+            SELECT * FROM unnest(CAST(:u AS text[]), CAST(:n AS int[])))"""),
+        {"u": [u for u, _ in pairs], "n": [n for _, n in pairs]}).all():
+        by_unit.setdefault((unit, no), {})[f"준거{num}"] = txt
 
     out: dict[tuple[str, str], str] = {}
     for eid, unit, no in keys:

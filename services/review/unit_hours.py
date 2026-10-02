@@ -188,6 +188,7 @@ def unit_evidence(s: Session, submission_id: int,
         for ev in (p.get("evidence") or []):
             fids = [f for f in (ev.get("fids") or []) if f]
             quote = ev.get("quote") or ""
+            ref = ev.get("pc_ref") or ev.get("ksa_ref") or ""      # 신형(수행준거) / 구형(항목)
             key = f"{','.join(fids)}|{quote}|{ev.get('fit') or ''}"
             got = seen[code].get(key)
             if got is None:
@@ -198,15 +199,15 @@ def unit_evidence(s: Session, submission_id: int,
                     "why": ev.get("why") or "",
                     "fit": ev.get("fit") or "직접",   # 옛 결과에는 없다 — 직접으로 본다
                     "grade": ev.get("grade") or "",
-                    "ksa_ref": ev.get("ksa_ref") or "",
+                    "ksa_ref": ref,
                     "fids": fids,
-                    "refs": [x for x in [ev.get("ksa_ref")] if x],
+                    "refs": [x for x in [ref] if x],
                     "elements": [p.get("element_name") or eid],
                     "n": 1,
                 }
             else:
                 got["n"] += 1
-                r, el = ev.get("ksa_ref"), p.get("element_name") or eid
+                r, el = ref, p.get("element_name") or eid
                 if r and r not in got["refs"]:
                     got["refs"].append(r)
                 if el not in got["elements"]:

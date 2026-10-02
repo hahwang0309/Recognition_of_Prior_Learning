@@ -111,9 +111,11 @@ def heatmap(units: list[dict], cells: dict[tuple[str, int], dict], max_no: int,
                 tip = f'{name} — {label} (권고 {rec} {rname})'
             else:
                 cls, ico = rcls, rico
-                n_gap = len(x["payload"].get("uncovered_ksa") or [])
+                pl = x["payload"]
+                n_gap = len(pl.get("uncovered_pc") or pl.get("uncovered_ksa") or [])
+                what = "수행준거" if pl.get("schema") == "pc" else "KSA"
                 tip = (f'{name} — {rec} {rname}'
-                       + (f' / 미확보 KSA {n_gap}개' if n_gap else ''))
+                       + (f' / 미확보 {what} {n_gap}개' if n_gap else ''))
             tds += (f'<td class="hc {cls}" title="{e(tip)}">'
                     f'<span class="hi">{ico}</span><span class="hn">{e(name)}</span></td>')
         body += f'<tr><th class="rl">요소 {no}</th>{tds}</tr>'

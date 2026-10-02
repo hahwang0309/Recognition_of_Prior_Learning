@@ -241,7 +241,7 @@ def _evidence(ev: list[dict], frags: dict[str, str], eid: str,
     rows = ""
     fmeta = fmeta or {}
     for x in ev:
-        ref = x.get("ksa_ref") or ""
+        ref = x.get("pc_ref") or x.get("ksa_ref") or ""      # 신형(수행준거) / 구형(항목)
         label = label_of(lab, eid, ref)
         g = (x.get("grade") or "").strip().upper()[:1]
         fids = [f for f in (x.get("fids") or []) if f]
@@ -277,7 +277,7 @@ def _evidence(ev: list[dict], frags: dict[str, str], eid: str,
                  f'<td>{btn}{origs}</td></tr>')
     return (f'<table class="et"><colgroup><col class="c1"><col class="c2">'
             f'<col class="c3"><col class="c4"></colgroup>'
-            f'<thead><tr><th>KSA</th><th>근거 인용문</th><th>자료</th><th>원문</th></tr></thead>'
+            f'<thead><tr><th>{"수행준거" if any(x.get("pc_ref") for x in ev) else "KSA"}</th><th>근거 인용문</th><th>자료</th><th>원문</th></tr></thead>'
             f'<tbody>{rows}</tbody></table>')
 
 
@@ -301,7 +301,7 @@ def _uncovered(unc: list, eid: str, lab: dict[tuple[str, str], str],
                  f'<td><span class="st2 {cls}">{e(status)}</span></td></tr>')
     return (f'<table class="et"><colgroup><col class="c1"><col class="c2">'
             f'<col class="c3"></colgroup>'
-            f'<thead><tr><th>KSA</th><th>왜 비어 있나</th><th>구분</th></tr></thead>'
+            f'<thead><tr><th>{"수행준거" if any(str((u.get("ref") if isinstance(u, dict) else u) or "").startswith("준거") for u in unc) else "KSA"}</th><th>왜 비어 있나</th><th>구분</th></tr></thead>'
             f'<tbody>{rows}</tbody></table>')
 
 
@@ -325,8 +325,8 @@ def _element(x: dict, frags: dict[str, str], rv: dict, names: dict[str, str],
     body = ""
     if ev := p.get("evidence"):
         body += (f'<div class="blk"><div class="t">근거 {len(ev)}건'
-                 + (f' · 기준 KSA {len(ev) + len(p.get("uncovered_ksa") or [])}개 가운데'
-                    if p.get("uncovered_ksa") else '')
+                 + (f' · 기준 {"수행준거" if p.get("schema") == "pc" else "KSA"} {len(ev) + len(p.get("uncovered_pc") or p.get("uncovered_ksa") or [])}개 가운데'
+                    if (p.get("uncovered_pc") or p.get("uncovered_ksa")) else '')
                  + f'</div>{_evidence(ev, frags, x["element_id"], lab, own_unit, fmeta)}</div>')
 
     pb = p.get("period_backing") or {}
@@ -348,7 +348,7 @@ def _element(x: dict, frags: dict[str, str], rv: dict, names: dict[str, str],
                         + "</div>" for n in neg)
         body += f'<div class="blk"><div class="t">본인이 「하지 않았다」고 밝힌 부분</div>{items}</div>'
 
-    if unc := p.get("uncovered_ksa"):
+    if unc := (p.get("uncovered_pc") or p.get("uncovered_ksa")):
         body += (f'<div class="blk"><div class="t">확인 안 된 항목 {len(unc)}개 — '
                  f'「부정진술」은 본인이 하지 않았다고 밝힌 것, 「미확보」는 자료가 '
                  f'없는 것입니다</div>{_uncovered(unc, x["element_id"], lab, fmeta)}</div>')
@@ -398,7 +398,7 @@ def _element(x: dict, frags: dict[str, str], rv: dict, names: dict[str, str],
     if p.get("decided_by") == "rule":
         marks += '<span class="mk rule">기록으로 확정</span>'
     n_ev = len(p.get("evidence") or [])
-    n_un = len(p.get("uncovered_ksa") or [])
+    n_un = len(p.get("uncovered_pc") or p.get("uncovered_ksa") or [])
     h = hours.get(own_unit)
     if h:
         unit = f"{unit} · {h}시간" if unit else f"{h}시간"

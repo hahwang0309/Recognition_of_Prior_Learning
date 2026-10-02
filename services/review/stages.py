@@ -144,7 +144,8 @@ def collect_items(els: list[dict], names: dict[str, tuple[str, str]] | None = No
                         it.oral_check.append(q)
             it.targets.append({"eid": eid, "unit_code": eid.split("_")[0],
                                "unit": un, "element": en,
-                               "ksa": list(r.get("ksa_refs") or [])})
+                               # 신형(2026-10-02)은 수행준거 참조 pc_refs, 구형은 ksa_refs
+                               "ksa": list(r.get("pc_refs") or r.get("ksa_refs") or [])})
     return {m: sorted(v.values(), key=lambda i: (-i.n_elements, i.item))
             for m, v in by_method.items()}
 

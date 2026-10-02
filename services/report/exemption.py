@@ -15,7 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from krpl_core.config import get_rubric
-from services.report._shared import STEP_CSS, TRACK_CSS, step_head, step_nav, track_chip
+from services.report._shared import STEP_CSS, TRACK_CSS, step_head, step_nav, track_chip, unit_count_text
 from services.report.layout import e
 from services.report.track_a_report import CSS
 from services.review.coverage import unit_verdicts
@@ -105,12 +105,10 @@ def render_exemption(s: Session, assessment_id: int) -> str:
                 hours, why = 0, "근거 분석에 이 단위가 없습니다 — 훈련 필요"
             elif b["verdict"] == "인정":
                 hours = req_h
-                why = (f"요소 {b['n_covered']}/{b['n_total']} 인정 "
-                       f"{b['ratio']:.0%} → 인정, 요구시간 전체 면제")
+                why = f"{unit_count_text(b)} → 인정, 요구시간 전체 면제"
             else:
                 hours = 0
-                why = (f"요소 {b['n_covered']}/{b['n_total']} 인정 "
-                       f"{b['ratio']:.0%} — {b['verdict']}")
+                why = f"{unit_count_text(b)} — {b['verdict']}"
             ex_part += hours
             n_part += 1 if hours else 0
         elif v in FULL:

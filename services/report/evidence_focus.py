@@ -82,6 +82,7 @@ class _BUnit:
     verdict: str
     completed: int = 0
     to_pass: int = 0
+    pc: bool = False          # 신형(수행준거 점수) 판정이면 True — 문구만 다르다
 
 
 def _cell(n: int, mx: int) -> str:
@@ -113,9 +114,12 @@ def render_evidence_focus(s: Session, submission_id: int) -> str:
         # Track B 에는 기록 확인이 없다. 「추가 인정이 필요한 단위」는 아직 항목
         # 근거로 인정되지 않은 단위다 — 위원이 근거를 더 봐야 하는 것들.
         verds = {u["code"]: u for u in unit_verdicts(s, ev_aid)} if ev_aid else {}
-        gaps = [_BUnit(u["code"], u["name"], u["hours"], u["ratio"],
-                       u["n_covered"], u["n_total"], u["verdict"])
-                for u in verds.values() if u["verdict"] != "인정"]
+        gaps = []
+        for u in verds.values():
+            if u["verdict"] == "인정":
+                continue
+            gaps.append(_BUnit(u["code"], u["name"], u["hours"], u["ratio"], u["n_covered"], u["n_total"],
+                               u["verdict"], pc=u.get("format", "ksa") != "ksa"))
     else:
         gaps = unit_gaps(s, time_aid) if time_aid else []
     by_unit = unit_evidence(s, submission_id, [g.unit_code for g in gaps]) if gaps else {}
@@ -160,7 +164,7 @@ def render_evidence_focus(s: Session, submission_id: int) -> str:
                     if (g.unit_code, d["doc"]) in neg else '<td class="v"')
                 for d in docs)
             tot = sum(grid.get((g.unit_code, d["doc"]), 0) for d in docs)
-            meta = (f'요구 {g.required}h · 요소 {g.n_covered}/{g.n_total} 인정 '
+            meta = (f'요구 {g.required}h · {"수행준거" if getattr(g, "pc", False) else "요소"} {g.n_covered}/{g.n_total} {"≥1" if getattr(g, "pc", False) else "인정"} '
                     f'({g.ratio_final:.0%}) · {g.verdict}' if is_b else
                     f'요구 {g.required}h · 이수 {g.completed or 0}h '
                     f'({g.ratio_final:.0%}) · 인정선까지 +{g.to_pass}h')

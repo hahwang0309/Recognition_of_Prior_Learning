@@ -148,6 +148,8 @@ def unit_by_scores(elements: list[tuple[str, dict[str, Any]]], rubric,
 def covered_refs(payload: dict[str, Any], excluded: Iterable[str] = (),
                  all_refs: Iterable[str] | None = None) -> set[str]:
     """인정된 항목 ref 집합 — element_coverage 와 같은 규칙. 계획 페이지가 「미확인 항목」을 고를 때 쓴다."""
+    if is_pc_format(payload):
+        return _pc_covered_refs(payload, excluded, all_refs)
     marks = set(excluded or ())
     ex = {m for m in marks if not m.startswith(MARK_PREFIXES)}
     added = {m[len(ADD):] for m in marks if m.startswith(ADD)}
@@ -167,6 +169,26 @@ def covered_refs(payload: dict[str, Any], excluded: Iterable[str] = (),
     return covered | ((added & refs) if refs else added)
 
 
+def pc_refs_of(payload: dict[str, Any], all_refs: Iterable[str] | None = None) -> list[str]:
+    """신형 요소의 수행준거 참조 전체 — 카탈로그(all_refs)가 있으면 그것, 없으면 근거+미확보의 합집합(번호순)."""
+    refs: list[str] = list(all_refs or ())
+    seen = set(refs)
+    for ev in payload.get("evidence") or []:
+        r = ev.get("pc_ref") if isinstance(ev, dict) else None
+        if r and r not in seen:
+            seen.add(r); refs.append(r)
+    for u in payload.get("uncovered_pc") or []:
+        r = u.get("ref") if isinstance(u, dict) else u
+        if r and r not in seen:
+            seen.add(r); refs.append(r)
+    return refs
+
+
+def _pc_covered_refs(payload, excluded=(), all_refs=None) -> set[str]:
+    """신형: 점수 ≥1 인 수행준거. 구형 함수들이 신형 payload 를 받아도 뜻이 통하게 한다."""
+    return {r for r in pc_refs_of(payload, all_refs) if pc_score(payload, r, excluded)[0] >= 1}
+
+
 def element_coverage(payload: dict[str, Any], excluded: Iterable[str] = (),
                      all_refs: Iterable[str] | None = None) -> tuple[int, int, float]:
     """(인정된 항목 수, 항목 전체 수, 비율).
@@ -176,6 +198,10 @@ def element_coverage(payload: dict[str, Any], excluded: Iterable[str] = (),
     같은 항목에 근거가 둘이면 하나로 센다. 근거를 빼도 다른 근거가 남아 있으면 인정이다.
     근거의 `fit`(직접|간접|부정, 2026-09-24): **직접만 인정**으로 센다. fit 이 없는 옛 결과는 직접으로 본다.
     """
+    if is_pc_format(payload):
+        refs_pc = pc_refs_of(payload, all_refs)
+        cov = _pc_covered_refs(payload, excluded, all_refs)
+        return len(cov), len(refs_pc), (len(cov) / len(refs_pc) if refs_pc else 0.0)
     marks = set(excluded or ())
     ex = {m for m in marks if not m.startswith(MARK_PREFIXES)}
     added = {m[len(ADD):] for m in marks if m.startswith(ADD)}
@@ -325,6 +351,7 @@ def unit_verdicts(s, assessment_id: int) -> list[dict[str, Any]]:
     from collections import defaultdict
     from sqlalchemy import text
     from krpl_core.config import get_rubric
+    from services.catalog.ncs_struct import element_no as _eno_, ksa_of, pcs_of, unit_of
 
     rb = get_rubric()
     prog = s.execute(text("""SELECT sub.target_program_id FROM assessment a
@@ -343,35 +370,40 @@ def unit_verdicts(s, assessment_id: int) -> list[dict[str, Any]]:
         SELECT element_id, excluded_evidence FROM element_review WHERE assessment_id=:i"""),
         {"i": assessment_id})}
 
-    # 항목 전체 — 같은 항목이 수행준거마다 반복되므로 한 번만 센다.
-    ksa_all: dict[tuple, list[str]] = defaultdict(list)
-    seen: set[tuple] = set()
-    for r in s.execute(text("""
-        SELECT unit_code, element_no, ksa_type, ksa_no FROM catalog_ncs_ksa
-        WHERE unit_code = ANY(:u) ORDER BY unit_code, element_no, ksa_type, ksa_no, pc_no"""),
-        {"u": list(units_req)}):
-        k = (r[0], r[1], f"{r[2]}{r[3]}")
-        if k in seen:
-            continue
-        seen.add(k)
-        ksa_all[(r[0], r[1])].append(k[2])
-
-    def _eno(eid: str) -> int:
-        try:
-            return int(eid.rsplit(".", 1)[1])
-        except (IndexError, ValueError):
-            return 0
+    codes = list(units_req)
+    ksa_all = {k: [r for r, _ in v] for k, v in ksa_of(s, codes).items()}
+    pc_all = pcs_of(s, codes)
+    _eno = lambda eid: _eno_(eid) or 0   # noqa: E731
 
     by_unit: dict[str, list[dict]] = defaultdict(list)
     for x in els:
-        by_unit[x["element_id"].split("_", 1)[0]].append(x)
+        by_unit[unit_of(x["element_id"])].append(x)
 
     out = []
     for uc, (uname, req) in units_req.items():
         xs = by_unit.get(uc, [])
         marks_of = {x["element_id"]: list((reviews.get(x["element_id"]) or {}).get("excluded_evidence") or [])
                     for x in xs}
-        refs_of = {x["element_id"]: ksa_all.get((uc, _eno(x["element_id"])), []) for x in xs}
-        cov = unit_by_coverage([(x["element_id"], x["payload"]) for x in xs], rb, marks_of, refs_of)
-        out.append({"code": uc, "name": uname, "hours": req, **cov})
+        out.append({"code": uc, "name": uname, "hours": req,
+                    **unit_verdict_of(xs, rb, marks_of, uc, ksa_all, pc_all, _eno)})
     return out
+
+
+def unit_verdict_of(xs: list[dict], rb, marks_of: dict, uc: str, ksa_all: dict, pc_all: dict,
+                    eno) -> dict[str, Any]:
+    """단위 하나의 판정 — 형식에 따라 신형(수행준거 점수) 또는 구형(항목 커버리지).
+
+    `format`: pc | ksa | mixed. mixed(재분석으로 구형 요소가 섞임)는 신형 요소만으로 계산하고
+    화면이 띠를 보인다. 패널·계획·면제 화면이 모두 이 함수를 거쳐야 한다 — 각자 세면 어긋난다.
+    """
+    pc_xs = [x for x in xs if is_pc_format(x["payload"])]
+    if pc_xs:
+        pcs_by = {x["element_id"]: pc_all.get((uc, eno(x["element_id"])), []) for x in pc_xs}
+        r = unit_by_scores([(x["element_id"], x["payload"]) for x in pc_xs], rb,
+                           {x["element_id"]: marks_of.get(x["element_id"], []) for x in pc_xs}, pcs_by)
+        r["format"] = "pc" if len(pc_xs) == len(xs) else "mixed"
+        return r
+    refs_of = {x["element_id"]: ksa_all.get((uc, eno(x["element_id"])), []) for x in xs}
+    r = unit_by_coverage([(x["element_id"], x["payload"]) for x in xs], rb, marks_of, refs_of)
+    r["format"] = "ksa"
+    return r

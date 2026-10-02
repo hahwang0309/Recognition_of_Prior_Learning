@@ -15,6 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from krpl_core.config import get_rubric
+from services.report._shared import unit_count_text
 from services.report._shared import param_table, pending
 from services.report.track_a_report import CSS as BASE_CSS
 from services.review.plan import DEMO_LADDER, METHODS, latest_plan, exams_for, load_exams
@@ -96,10 +97,10 @@ def render_plan(s: Session, assessment_id: int) -> str:
     lines = ""
     if ok:
         lines += "<h3>인정 단위 — 요구시간 전체 인정</h3>" + "".join(
-            f"<p class='one'><span class='st good'>●</span> {e(u['name'])} — {u['hours']}h · 요소 {u['n_covered']}/{u['n_total']} 인정</p>" for u in ok)
+            f"<p class='one'><span class='st good'>●</span> {e(u['name'])} — {u['hours']}h · {unit_count_text(u)}</p>" for u in ok)
     if no:
         lines += "<h3>불인정 단위 — 훈련 이수</h3>" + "".join(
-            f"<p class='one'><span class='st crit'>■</span> {e(u['name'])} — {u['hours']}h · 요소 {u['n_covered']}/{u['n_total']} 인정</p>" for u in no)
+            f"<p class='one'><span class='st crit'>■</span> {e(u['name'])} — {u['hours']}h · {unit_count_text(u)}</p>" for u in no)
 
     # ── 2 보류 단위 요약 — 표 하나. 항목을 하나씩 늘어놓지 않는다 ──
     if hold:

@@ -25,8 +25,9 @@ from sqlalchemy.orm import Session
 from krpl_core.audit import AuditStore, audit_root
 from krpl_core.config import CONFIG_DIR, get_model_profile, get_rubric
 from krpl_core.llm import LLMClient, LLMError, Turn, get_client
-from services.review.coverage import (ADD, Q, S, covered_refs, element_verdict,
-                                      unit_by_coverage)
+from services.catalog.ncs_struct import ksa_of, pcs_of, unit_of
+from services.review.coverage import (MARK_PREFIXES, covered_refs, element_scores,
+                                      element_verdict, is_pc_format, unit_verdict_of)
 
 METHODS = ("시험", "시연·구현", "면접")
 KIND_KO = {"지식": "지식", "기술": "기술", "태도": "태도"}
@@ -58,7 +59,11 @@ def assign(items: list[dict[str, Any]], has_exam: bool) -> dict[str, list[dict[s
     out: dict[str, list[dict[str, Any]]] = {m: [] for m in METHODS}
     for it in items:
         kind = it.get("kind")
-        if kind == "지식":
+        if kind == "준거":
+            # 신형(2026-10-02): 수행준거 점수로 배정 — 0(근거 없음) → 시연·구현(외부평가 실기),
+            # 1(간접만) → 면접. 지식·기술·태도 구분이 없으므로 시험 배정은 단위 수준 안내로만.
+            m = "시연·구현" if int(it.get("score") or 0) == 0 else "면접"
+        elif kind == "지식":
             m = "시험" if has_exam else "면접"
         elif kind == "기술":
             m = "시연·구현"
@@ -93,31 +98,42 @@ def unit_status(s: Session, assessment_id: int) -> dict[str, Any]:
     units_req = {r[0]: (r[1], r[2]) for r in s.execute(text("""
         SELECT unit_code, COALESCE(unit_name, unit_code), required_hours FROM catalog_wsd_required
         WHERE program_id=:p"""), {"p": a["target_program_id"]})}
-    ksa_all: dict[tuple, list[tuple[str, str]]] = defaultdict(list)
-    seen: set[tuple] = set()
-    for r in s.execute(text("""
-        SELECT unit_code, element_no, ksa_type, ksa_no, ksa_text FROM catalog_ncs_ksa
-        WHERE unit_code = ANY(:u) ORDER BY unit_code, element_no, ksa_type, ksa_no, pc_no"""), {"u": list(units_req)}):
-        k = (r[0], r[1], f"{r[2]}{r[3]}")
-        if k in seen:
-            continue
-        seen.add(k)
-        ksa_all[(r[0], r[1])].append((k[2], r[4]))
+    codes = list(units_req)
+    ksa_all = ksa_of(s, codes)
+    pc_all = pcs_of(s, codes)
+    ksa_refs_all = {k: [r for r, _ in v] for k, v in ksa_all.items()}
 
     by_unit: dict[str, list[dict]] = defaultdict(list)
     for x in els:
-        by_unit[x["element_id"].split("_", 1)[0]].append(x)
+        by_unit[unit_of(x["element_id"])].append(x)
     units, buckets = [], {"인정": 0, "보류": 0, "불인정": 0}
     for uc, (uname, req) in units_req.items():
         xs = by_unit.get(uc, [])
         marks_of = {x["element_id"]: reviews.get(x["element_id"], []) for x in xs}
-        refs_of = {x["element_id"]: [r for r, _ in ksa_all.get((uc, _eno(x["element_id"])), [])] for x in xs}
-        cov = unit_by_coverage([(x["element_id"], x["payload"]) for x in xs], rb, marks_of, refs_of)
+        cov = unit_verdict_of(xs, rb, marks_of, uc, ksa_refs_all, pc_all, _eno)
         items, elements = [], []
         for x in xs:
             eid, p = x["element_id"], x["payload"]
             ename = p.get("element_name") or eid
             elements.append({"eid": eid, "name": ename})
+            if is_pc_format(p):
+                # 신형: 점수 < 2 인 수행준거가 확인 대상. 2 인 것은 확인하지 않는다.
+                rows = element_scores(p, pc_all.get((uc, _eno(eid)), []), marks_of[eid], rb)
+                elements[-1]["ok"] = all(r["score"] == 2 for r in rows) if rows else False
+                for r in rows:
+                    if r["score"] == 2:
+                        continue
+                    evs = [ev for ev in (p.get("evidence") or []) if ev.get("pc_ref") == r["ref"]]
+                    quotes = [ev.get("quote", "") for ev in evs if (ev.get("fit") or "직접") != "부정"]
+                    items.append({"eid": eid, "element": ename, "ref": r["ref"], "kind": "준거",
+                                  "name": r["text"], "score": r["score"], "src": r["src"],
+                                  "fit_seen": sorted({ev.get("fit") or "직접" for ev in evs}),
+                                  "quotes": [q for q in quotes if q][:2],
+                                  "prior": [{"method": x_.get("method"), "item": x_.get("item"),
+                                             "oral_check": x_.get("oral_check") or []}
+                                            for x_ in (p.get("remediation") or [])
+                                            if r["ref"] in (x_.get("pc_refs") or [])]})
+                continue
             refs = ksa_all.get((uc, _eno(eid)), [])
             # 요소가 인정(항목 ≥50%)이면 확인할 것이 없다 — 통째로 건너뛴다.
             # 예전에는 보류 단위의 미확인 항목을 전부 모아, 이미 인정된 요소의
@@ -127,7 +143,7 @@ def unit_status(s: Session, assessment_id: int) -> dict[str, Any]:
             if el_ok:
                 continue
             done = covered_refs(p, marks_of[eid], [r for r, _ in refs])
-            ex = {m for m in marks_of[eid] if not m.startswith((ADD, Q, S))}
+            ex = {m for m in marks_of[eid] if not m.startswith(MARK_PREFIXES)}
             evs_by_ref: dict[str, list[dict]] = defaultdict(list)
             for ev in p.get("evidence") or []:
                 if ev.get("ksa_ref"):
@@ -148,6 +164,7 @@ def unit_status(s: Session, assessment_id: int) -> dict[str, Any]:
         buckets[cov["verdict"]] += req
         units.append({"code": uc, "name": uname, "hours": req, "verdict": cov["verdict"], "ratio": cov["ratio"],
                       "n_covered": cov["n_covered"], "n_total": cov["n_total"],
+                      "mean": cov.get("mean"), "format": cov.get("format", "ksa"),
                       "n_open_elements": sum(1 for x in elements if not x.get("ok")),
                       "elements": elements, "items": items})
     return {"aid": assessment_id, "sid": a["submission_id"], "case_number": a["case_number"],
@@ -178,20 +195,19 @@ def perf_criteria(s: Session, codes: list[str], per_unit: int = 12) -> dict[str,
     out: dict[str, list[dict[str, str]]] = {c: [] for c in codes}
     if not codes:
         return out
-    for r in s.execute(text("""
-        SELECT p.unit_code, COALESCE(e.element_name, '') AS element, p.pc_text
-        FROM catalog_ncs_pc p
-        LEFT JOIN catalog_ncs_element e
-          ON e.unit_code = p.unit_code AND e.element_no = p.element_no
-        WHERE p.unit_code = ANY(:c) AND COALESCE(p.pc_text, '') <> ''
-        ORDER BY p.unit_code, p.element_no, p.pc_no"""), {"c": list(codes)}):
-        if len(out.get(r[0], [])) < per_unit:
-            out.setdefault(r[0], []).append({"element": r[1], "text": r[2]})
+    names = {(r[0], r[1]): r[2] for r in s.execute(text("""
+        SELECT unit_code, element_no, element_name FROM catalog_ncs_element WHERE unit_code = ANY(:c)"""),
+        {"c": list(codes)})}
+    for (uc, en), pcs in sorted(pcs_of(s, list(codes)).items()):
+        for pc in pcs:
+            if pc.get("text") and len(out.get(uc, [])) < per_unit:
+                out.setdefault(uc, []).append({"element": names.get((uc, en), ""), "text": pc["text"], "ref": pc["ref"]})
     return out
 
 
 def build_plan_input(st: dict[str, Any], exams: dict[str, dict[str, Any]],
-                     pc: dict[str, list[dict[str, str]]] | None = None) -> dict[str, Any]:
+                     pc: dict[str, list[dict[str, str]]] | None = None,
+                     only_codes: list[str] | None = None) -> dict[str, Any]:
     """보류 단위만. 항목은 「무엇을 물어야 하나」의 목록이고, 수행준거가 실기의 뼈대다.
 
     예전에는 항목마다 문안을 받아 화면에 하나씩 늘어놓았다. 위원이 그대로 들고
@@ -200,7 +216,7 @@ def build_plan_input(st: dict[str, Any], exams: dict[str, dict[str, Any]],
     pc = pc or {}
     units = []
     for u in st["units"]:
-        if u["verdict"] != "보류":
+        if u["verdict"] != "보류" or (only_codes is not None and u["code"] not in only_codes):
             continue
         ex = exams_for(u["code"], exams)
         groups = assign(u["items"], bool(ex))
@@ -215,6 +231,7 @@ def build_plan_input(st: dict[str, Any], exams: dict[str, dict[str, Any]],
             "pc": pc.get(u["code"]) or [],
             "items": [{"ref": it["ref"], "kind": it["kind"], "name": it["name"],
                        "element": it["element"], "quotes": it["quotes"]}
+                      | ({"score": it["score"]} if "score" in it else {})
                       for m in METHODS for it in groups[m]],
         })
     return {"case_number": st["case_number"],
@@ -306,8 +323,12 @@ def ask_plan(inp: dict[str, Any], client: LLMClient | None = None, profile_name:
 
 # ── 제출 ───────────────────────────────────────────────────────────────────
 def submit(s: Session, assessment_id: int, reviewer: str | None = None,
-           client: LLMClient | None = None) -> dict[str, Any]:
-    """위원 판정 제출: 단위 판정 스냅샷(stage panel) + 확인 계획(stage plan). 계획 dict 를 돌려준다."""
+           client: LLMClient | None = None, only_codes: list[str] | None = None) -> dict[str, Any]:
+    """위원 판정 제출: 단위 판정 스냅샷(stage panel) + 확인 계획(stage plan). 계획 dict 를 돌려준다.
+
+    `only_codes` — 위원이 「확인 계획에 포함」으로 고른 보류 단위(4차 TF 의견 14). 계획 입력에만
+    적용하고 스냅샷의 묶음 시간은 전체를 적는다. None 이면 보류 단위 전부.
+    """
     st = unit_status(s, assessment_id)
     exams = load_exams()
     now = datetime.now()
@@ -317,17 +338,18 @@ def submit(s: Session, assessment_id: int, reviewer: str | None = None,
         {"a": assessment_id}).scalar() or 0)
     snap = {"submitted_at": now.isoformat(timespec="seconds"), "reviewer": reviewer,
             "buckets": st["buckets"], "total_hours": st["total_hours"],
-            "units": [{k: u[k] for k in ("code", "name", "hours", "verdict", "ratio", "n_covered", "n_total")}
+            "units": [{k: u[k] for k in ("code", "name", "hours", "verdict", "ratio", "n_covered", "n_total", "mean", "format")}
                       | {"n_uncovered": len(u["items"])} for u in st["units"]]}
     store.write("panel", "위원판정_제출", snap, seq=seq,
                 note=f"인정 {st['buckets']['인정']}h · 보류 {st['buckets']['보류']}h · 불인정 {st['buckets']['불인정']}h")
-    hold_codes = [u["code"] for u in st["units"] if u["verdict"] == "보류"]
-    inp = build_plan_input(st, exams, perf_criteria(s, hold_codes))
+    hold_codes = [u["code"] for u in st["units"] if u["verdict"] == "보류"
+                  and (only_codes is None or u["code"] in only_codes)]
+    inp = build_plan_input(st, exams, perf_criteria(s, hold_codes), only_codes=hold_codes)
     empty = {"plan": {"interview": {}, "practical": []}, "errors": [], "usage": {}}
     ai = ask_plan(inp, client) if inp["units"] else empty
     plan = {"submitted_at": snap["submitted_at"], "reviewer": reviewer, "buckets": st["buckets"],
             "total_hours": st["total_hours"], "program": st["official_name"] or st["program"],
-            "units": [{k: u[k] for k in ("code", "name", "hours", "verdict", "n_covered", "n_total")} for u in st["units"]],
+            "units": [{k: u[k] for k in ("code", "name", "hours", "verdict", "n_covered", "n_total", "mean", "format")} for u in st["units"]],
             "input": inp, "ai": ai["plan"], "ai_errors": ai["errors"], "usage": ai["usage"],
             "exams": {u["code"]: exams_for(u["code"], exams) for u in inp["units"]}}
     u = ai["usage"]

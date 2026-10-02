@@ -121,6 +121,8 @@ class TrackBElementOut(BaseModel):
     period_backing: dict[str, Any] | None = None
     prior_learning: dict[str, Any] | None = None
     uncovered_ksa: list[dict[str, Any]] = Field(default_factory=list)
+    uncovered_pc: list[dict[str, Any]] = Field(default_factory=list)     # 신형(수행준거, 2026-10-02)
+    schema_: str | None = Field(default=None, alias="schema")           # "pc" 면 신형 요소
     remediation: list[dict[str, Any]] = Field(default_factory=list)
     negative_statements: list[dict[str, Any]] = Field(default_factory=list)
     proven_dimensions: list[str] = Field(default_factory=list)
