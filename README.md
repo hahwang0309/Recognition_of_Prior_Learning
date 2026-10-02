@@ -40,7 +40,7 @@ cp .env.example .env         # 비밀값·환경별 값. 아래 설명 참고
 | `/cases` | 접수 현황(시작점). 진행 막대는 `/cases/progress.json` 을 긁는다 |
 | `/submissions/{sid}` | 심사 개요 — 단계줄·인정 시간 막대·다음 단계 링크 |
 | `/assessments/{aid}/review` | Track A 위원 페이지(기록 확인 결과 + 위원 추가 인정 시간) |
-| `/assessments/{aid}/panel` | Track B 위원 페이지(항목별 인정·근거 부적합 체크, 문서 열람창) |
+| `/assessments/{aid}/panel` | Track B 위원 페이지(수행준거별 0/1/2 점수, 문서 열람창) |
 | `/assessments/{aid}/plan` | Track B 확인 계획(「제출」 뒤 생성) |
 | `…/review?ro=1`, `…/panel?ro=1` | 위 두 위원 페이지의 **열람 전용** — 체크박스·시간 입력이 보이되 눌리지 않고 제출이 없다. 집담회에서 위원 기기로 배포할 때(ngrok) 쓴다 |
 | `/assessments/{aid}/exemption` | Track A 면제 결과(최종 판정) |
@@ -62,7 +62,7 @@ cp .env.example .env         # 비밀값·환경별 값. 아래 설명 참고
     --case R2026-9302 --program 건축설계_L3
 # ② 판정 — Track A 는 접수 때 자동. Track B(AI) 는 명시적으로 (Haiku, 건당 $1.1~1.4 · 6~8분)
 .venv/bin/python scripts/assess.py R2026-9302            # --profile trackb_assess_opus 로 Opus
-# ③ 위원 페이지 — 브라우저에서 항목별 인정/근거 부적합 체크 (즉시 재계산·자동 저장)
+# ③ 위원 페이지 — 브라우저에서 수행준거 점수 0/1/2 를 고친다 (즉시 재계산·자동 저장)
 #    Track A: http://localhost:8000/assessments/{aid}/review   Track B: http://localhost:8000/assessments/{aid}/panel
 #    aid 는 심사 개요(/submissions/{sid}) 또는 /cases 에서 찾는다.
 # ④ 「제출 → 확인 계획」 버튼 → 보류 단위 확인 계획 (AI 1회, $0.07) → /assessments/{aid}/plan
@@ -170,6 +170,7 @@ db/              Alembic 마이그레이션 · 카탈로그 적재
 | 7. 보고서 중심 흐름 (심사 개요 + 확정 포맷 보고서 2종) | ✅ 완료 |
 | 8. 전문가 검토 5단계 (질문지·실기 과제·최종 결과) | ✅ 완료 |
 | 9. 위원 페이지 (Track A/B 한 쪽 · 항목별 인정 → 단위 판정 재계산 · 문서 열람창) | ✅ 완료 (2026-09-23~24) |
+| 12. 판정 단위 수행준거 전환 (프롬프트 v6 · 0/1/2 점수 · 단위 규칙 · 위원 화면 2층 · 확인 계획 단위 선택) | ✅ 완료 (2026-10-02, 4차 TF 반영) — 실호출 검증 뒤 T5 재분석 |
 | 10. 제출 → 보류 단위 확인 계획 (시험·시연/구현·면접, AI 문안) | ✅ 완료 (2026-09-24) — 시험 문항 출처는 TF 결정 필요 |
 | 11. 확인 계획의 채택·결과 입력 | ⬜ 없음 — 결과 입력은 기존 5단계 화면(`remediation_result`)으로 |
 
@@ -468,6 +469,35 @@ R0(기이수 인정검토)는 **내부평가 합격이 확인될 때만** 성립
 | Track A | `GET /assessments/{aid}/review` (kind=time) · `storage/reports/{case}.html` | 인정·보류·불인정 카드, 단위별 이수/인정 막대, 보류 단위 이유·추가 증빙·위원 판정, 파라미터 표 |
 | Track B | `GET /assessments/{aid}/panel` · `storage/reports/{case}_panel.html` | 인정·보류·불인정 카드, **3점 정량표**(내용 일치성·교육시간·검증가능성), **항목별 인정 여부(근거 부적합·위원 인정 체크 → 능력단위 판정 재계산)**, 문서 열람창(인용·문서명 클릭 → 원문 조각 강조, 낱말 검색), 파라미터 표 |
 
+### 판정 단위는 수행준거다 (2026-10-02, 4차 TF 반영)
+
+4차 TF(9/30): 「KSA 항목을 세는 것은 NCS 취지와 다르다 — 수행준거(「…할 수 있다」)로 보라. 절반 넘으면 인정은 너무
+느슨하다 — 빈 수행준거가 없어야 하고 전체도 문턱을 넘어야 한다.」 그래서 Track B 의 판정 단위를 바꿨다.
+
+| 층 | 규칙 | 출처 |
+|---|---|---|
+| 수행준거 점수 | **2** = 직접 근거 1건 이상 · **1** = 직접 없고 간접만 · **0** = 근거 없음 또는 부정 진술. 존재 기준 — 근거가 많아져도 내려가지 않는다. 위원이 0/1/2 를 고치면 위원 값 우선 | rubric `track_b.pc_scoring` |
+| 능력단위 | 0 인 수행준거가 하나라도 있으면 **불인정** · 전부 ≥1 이고 평균 ≥ **1.5** 인정 · ≥ **1.0** 보류 · 미만 불인정 | rubric `track_b.unit_rule` (출발값, `pending_decisions`) |
+
+- AI 입력(`services/assess/package.py`)은 수행준거만 보낸다 — **KSA 는 뺐다**(근거 수집이 수행준거 문장에만 매이게).
+  이 DB 의 `catalog_ncs_ksa.pc_no` 는 요소의 KSA 를 모든 수행준거에 복사한 것이라(47,617 요소 예외 0) KSA↔수행준거
+  연결은 만들 수 없다. 프롬프트 `trackb_v6.md`: 근거는 `pc_ref`(「준거n」), 미확보는 `uncovered_pc`, 보완은 `pc_refs`,
+  요소마다 `schema:"pc"`. 검증기는 형식을 보고 구형(ksa_ref)도 그대로 검증한다.
+- 계산은 `services/review/coverage.py` 의 `pc_score` → `element_scores` → `unit_by_scores`, 단위 하나의 입구는
+  `unit_verdict_of`(형식 pc / ksa / mixed). `unit_verdicts()` 의 키는 유지 + `mean`·`n_zero`·`format`.
+  위원 표시는 `element_review.excluded_evidence` 에 `pc:준거3=1` 로. 구형의 fid 제외·`add:` 는 신형에서 쓰지 않는다.
+- 위원 페이지(`track_b_panel.py`): 단위 → 수행준거 두 층(요소명은 캡션). 서버가 AI 점수를 페이지에 넣어 주고 JS 는
+  위원 값과 단위 규칙만 적용하며, 저장(`POST /assessments/{aid}/elements/{eid}/pc`) 응답의 서버 계산으로 다시 그린다.
+  근거는 **조각 기준으로 한 번만**(「이 조각이 n곳」), **등급 → 문서 종류 신뢰 순 → 적합도** 정렬(`_shared.DOC_PRIORITY`, 4차 의견 9).
+  제출 폼에 보류 단위마다 「확인 계획에 포함」 체크(4차 의견 14). 구형 요소는 띠 + 읽기 전용.
+- 확인 계획: 점수 <2 인 수행준거가 대상 — 0 → 외부평가 실기(시연·구현) · 1 → 면접. 보류 0 이면 AI 를 부르지 않고 그렇게 적는다.
+- Track A ③ 전문가 검토: 부족 단위마다 수행준거 점수표를 **참고값**으로 보이고, 시간 입력·50% 게이트는 그대로(2026-10-02 사용자 결정).
+- 재생 픽스처 `tests/fixtures/trackb/` 는 `scripts/convert_fixtures_pc.py` 로 구형(`trackb_ksa/`)에서 기계 변환한 것이다
+  (순환 배정·R3 간접 — 뜻이 아니라 모양). 실호출 산출물로 바꾸려면 4건 × $1~2.
+- 남은 것: T5 17건은 구형 판정이라 위원 페이지에 띠가 뜬다 — `assess.py --force` 로 재분석해야 점수가 나온다.
+
+#### 이전 규칙 (2026-09-24 ~ 10-01, 구형 판정을 읽을 때만)
+
 - **능력단위 판정은 인정된 항목(지식·기술·태도)의 비율로 낸다** (`coverage.unit_by_coverage`): 요소 커버리지 평균이
   50% 이상 인정 · 30% 이상 보류 · 미만 불인정. 위원 판정 라디오는 없다 — 판정은 항목에서 따라 나온다.
   근거마다 AI 가 적합도 `fit` 를 매긴다(2026-09-24, rubric `output_vocabulary.evidence_fit`, 검증기가 필수로 잡음):
@@ -518,7 +548,7 @@ Track B 에는 ① 기록 확인이 없다 — 코드가 맞는 이수 기록이
 | Track B 단계 | 화면 |
 |---|---|
 | ① 근거 분석 | `/assessments/{aid}/report` — 연구팀 회람본 그대로의 세 장 |
-| ② 위원 검토 | `/assessments/{aid}/panel` — 항목별 근거 인정 |
+| ② 위원 검토 | `/assessments/{aid}/panel` — 수행준거별 점수 |
 | ③ 확인 계획 | `/assessments/{aid}/plan` — 보류 단위의 시험·시연·면접 배정 |
 | ④ 최종 판정 | `/assessments/{time_aid}/exemption` — 면제 시간 |
 
@@ -532,7 +562,7 @@ Track B 에는 ① 기록 확인이 없다 — 코드가 맞는 이수 기록이
 | | 출처 | 규칙 |
 |---|---|---|
 | Track A | `unit_hours.unit_gaps()` | 이수 + 위원 인정이 요구의 50% 이상 → 요구시간 전체 |
-| Track B | `coverage.unit_verdicts()` | 요소별 인정 항목 비율의 평균이 50% 이상 → 요구시간 전체 |
+| Track B | `coverage.unit_verdicts()` | 수행준거 전부 ≥1 이고 평균 ≥1.5 → 요구시간 전체 (2026-10-02; 구형 판정은 요소 비율 50%) |
 
 `unit_verdicts()` 는 위원 페이지가 화면 안에서 세던 것을 꺼낸 것이다. 두 화면이 같은
 함수를 읽으므로 면제 결과와 위원 페이지가 다른 시간을 말할 수 없다.
