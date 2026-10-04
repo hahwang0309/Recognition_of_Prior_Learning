@@ -12,6 +12,7 @@ import json
 import re
 
 import pytest
+from krpl_core.config import get_rubric
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
@@ -119,8 +120,12 @@ def test_the_unit_verdict_counts_performance_criteria(client, case):
         assert 0 <= u["n_covered"] <= u["n_total"] and 0 <= u["mean"] <= 2
         assert u["ratio"] == pytest.approx(u["mean"] / 2)
         assert u["verdict"] in ("인정", "보류", "불인정")
-        if u["n_zero"]:
-            assert u["verdict"] == "불인정", "0 인 수행준거가 있으면 불인정"
+        ur = get_rubric().track_b["unit_rule"]
+        if ur["require_all_nonzero"] and u["n_zero"]:
+            assert u["verdict"] == "불인정", "0 조건이 켜져 있으면 0 인 수행준거가 있을 때 불인정"
+        else:
+            want = "인정" if u["mean"] >= ur["accept_mean"] else "보류" if u["mean"] >= ur["hold_mean"] else "불인정"
+            assert u["verdict"] == want, "판정은 rubric unit_rule 의 평균 문턱 그대로"
 
 
 def test_track_a_screens_keep_their_own_bar(client, case):

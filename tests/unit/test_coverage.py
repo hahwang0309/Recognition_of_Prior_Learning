@@ -171,9 +171,17 @@ def test_pc_override_by_reviewer(rb):
     assert pc_score(p, "준거3", ["pc:준거3=7"], rb) == (0, "ai"), "어휘 밖 값은 무시"
 
 
+def _rule(rb, **unit_rule):
+    """판정 규칙만 바꾼 rubric 대역 — 규칙의 두 방식(0 조건 있음/없음)을 rubric 현재값과 무관하게 검증한다."""
+    from types import SimpleNamespace
+    tb = dict(rb.track_b); tb["unit_rule"] = unit_rule
+    return SimpleNamespace(track_b=tb)
+
+
 def test_unit_by_scores_rule_and_boundaries(rb):
-    """모든 수행준거 ≥1 이고 평균 ≥1.5 인정 · ≥1.0 보류 · 0 이 하나라도 있으면 불인정."""
+    """0 조건 있는 방식(4차 TF 합의안): 모든 수행준거 ≥1 이고 평균 ≥1.5 인정 · ≥1.0 보류 · 0 이 하나라도 있으면 불인정."""
     from services.review.coverage import unit_by_scores
+    rb = _rule(rb, require_all_nonzero=True, accept_mean=1.5, hold_mean=1.0)
     pcs = {"U_1.1": PCS3, "U_1.2": [{"ref": "준거1", "text": "d"}]}
     # [2,2,1,1] 평균 1.5 → 인정 (경계 포함)
     e1 = _pc([("준거1", "직접"), ("준거2", "직접"), ("준거3", "간접")]); e2 = _pc([("준거1", "간접")])
@@ -197,6 +205,30 @@ def test_unit_by_scores_rule_and_boundaries(rb):
     # [1,1,1,1] 평균 1.0 → 보류 (경계) · [1,1,1,0]… 는 위에서. 평균 1.0 미만은 0 없이는 불가능
     e_all1 = _pc([("준거1", "간접"), ("준거2", "간접"), ("준거3", "간접")])
     assert unit_by_scores([("U_1.1", e_all1), ("U_1.2", e2)], rb, {}, pcs)["verdict"] == "보류"
+
+
+def test_unit_by_scores_mean_only_rule(rb):
+    """0 조건 없는 방식(2026-10-04): 평균만 본다 — 0 이 있어도 평균 ≥ 문턱이면 인정."""
+    from services.review.coverage import unit_by_scores
+    rb = _rule(rb, require_all_nonzero=False, accept_mean=1.3, hold_mean=1.0)
+    pcs = {"U_1.1": PCS3, "U_1.2": [{"ref": "준거1", "text": "d"}]}
+    d3 = _pc([("준거1", "직접"), ("준거2", "직접"), ("준거3", "직접")]); none = _pc([]); ind = _pc([("준거1", "간접")])
+    r = unit_by_scores([("U_1.1", d3), ("U_1.2", none)], rb, {}, pcs)          # [2,2,2,0] 1.5
+    assert (r["verdict"], r["n_zero"], r["mean"]) == ("인정", 1, 1.5)
+    d1 = _pc([("준거1", "직접"), ("준거2", "간접"), ("준거3", "간접")])
+    assert unit_by_scores([("U_1.1", d1), ("U_1.2", ind)], rb, {}, pcs)["verdict"] == "보류"      # [2,1,1,1] 1.25 < 1.3
+    d2 = _pc([("준거1", "직접"), ("준거2", "직접"), ("준거3", "간접")])
+    assert unit_by_scores([("U_1.1", d2), ("U_1.2", ind)], rb, {}, pcs)["verdict"] == "인정"      # [2,2,1,1] 1.5
+    assert unit_by_scores([("U_1.1", d2), ("U_1.2", none)], rb, {}, pcs)["verdict"] == "보류"     # [2,2,1,0] 1.25
+    i3 = _pc([("준거1", "간접"), ("준거2", "간접"), ("준거3", "간접")])
+    assert unit_by_scores([("U_1.1", i3), ("U_1.2", none)], rb, {}, pcs)["verdict"] == "불인정"   # [1,1,1,0] 0.75
+    assert unit_by_scores([("U_1.1", d3)], rb, {}, {})["verdict"] == "불인정", "수행준거가 없으면 불인정"
+
+
+def test_rubric_unit_rule_values(rb):
+    """rubric 의 현재 출발값(2026-10-04): 0 조건 없음 · 평균 1.3 인정 · 1.0 보류. 바꾸면 문서(README·CLAUDE.md §3)도 함께."""
+    ur = rb.track_b["unit_rule"]
+    assert (ur["require_all_nonzero"], ur["accept_mean"], ur["hold_mean"]) == (False, 1.3, 1.0)
 
 
 def test_old_format_is_not_pc(rb):

@@ -4,7 +4,7 @@
 → 3 수행준거별 점수(AI 값을 위원이 고친다 → 능력단위 판정이 바뀐다) → 4 판정 파라미터.
 
 신형(2026-10-02, 4차 TF): 단위 → 수행준거 두 층. 수행준거마다 0/1/2 점(직접 근거 2 · 간접만 1 · 없음·부정 0),
-위원이 점수를 고친다. 단위는 0 이 없고 평균 ≥1.5 면 인정, ≥1.0 보류. 규칙은 coverage.unit_by_scores 하나다 —
+위원이 점수를 고친다. 단위 판정은 rubric track_b.unit_rule(평균 문턱, 0 조건 여부). 규칙은 coverage.unit_by_scores 하나다 —
 화면 JS 는 AI 점수를 다시 세지 않고(서버가 넣어 준 값), 위원 값과 단위 규칙만 적용하며, 저장 응답의
 서버 계산으로 다시 그린다(2026-09-28 「화면≠서버」 사고 재발 방지).
 구형(항목 단위) 판정은 띠를 보이고 읽기만 된다 — 근거 분석을 다시 돌려야 한다.
@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from krpl_core.config import get_rubric
 from services.catalog.ncs_struct import element_no as _eno_, ksa_of, pcs_of, unit_of
-from services.report._shared import (STEP_CSS, TRACK_CSS, evidence_sort_key, param_table, pending,
+from services.report._shared import (STEP_CSS, TRACK_CSS, evidence_sort_key, param_table, pending, unit_rule_text,
                                      step_head, step_nav, track_chip, unit_count_text)
 from services.report.doc_viewer import js_literal
 from services.report.track_a_report import CSS as BASE_CSS
@@ -199,6 +199,7 @@ def render_panel(s: Session, assessment_id: int, *, readonly: bool = False) -> s
     hi, lo = rb.training_hours.get("adjustment_floor", 0.5), rb.training_hours.get("hold_floor", 0.3)
     ur = rb.track_b.get("unit_rule") or {}
     acc, hold = float(ur.get("accept_mean", 1.5)), float(ur.get("hold_mean", 1.0))
+    req0 = bool(ur.get("require_all_nonzero", True))
     _eno = lambda eid: _eno_(eid) or 0   # noqa: E731
 
     # ── 요소를 능력단위로 묶고 판정 계산 (coverage.unit_verdict_of — 다른 화면과 같은 셈) ──
@@ -345,8 +346,8 @@ def render_panel(s: Session, assessment_id: int, *, readonly: bool = False) -> s
          "0 = 근거 없음 또는 못 한다·안 해봤다는 본인 진술",
          "2026-10-02 결정 — 존재 기준(근거가 많아도 내려가지 않음)", True),
         ("능력단위 판정",
-         f"0 인 수행준거가 하나라도 있으면 불인정 · 전부 1 이상이고 평균 {acc:.1f} 이상이면 인정 · 평균 {hold:.1f} 이상이면 보류",
-         "4차 TF 직후 합의 — 출발값, 5차에서 검증", pending(rb, "track_b.unit_rule.accept_mean")),
+         unit_rule_text(rb),
+         "4차 TF 직후 합의(0 없음 · 1.5/1.0)에서 2026-10-04 조정 — 5차에서 확정", pending(rb, "track_b.unit_rule.accept_mean")),
         ("인정되면 몇 시간",
          "그 능력단위의 요구시간 전체. 수행준거에는 시간이 매겨져 있지 않아 충족 여부로만 판단합니다",
          "NCS 원자료 확인 · 설계안", False),
@@ -403,9 +404,9 @@ def render_panel(s: Session, assessment_id: int, *, readonly: bool = False) -> s
    <p class="sub">필수능력단위 {len(units)}개 · {tot}시간 · 요소 {len(els)}개 · 제출 문서 {len(docs)}건</p>
  </header>
  <div class="kpis">
-   <div class="kpi hl"><span>인정</span><b><span id="k-rec">{B['인정']}</span><i>h · <span id="k-recp">{B['인정'] / tot * 100:.0f}</span>%</i></b><em>0 없고 평균 {acc:.1f} 이상 · 요구시간 전체</em></div>
+   <div class="kpi hl"><span>인정</span><b><span id="k-rec">{B['인정']}</span><i>h · <span id="k-recp">{B['인정'] / tot * 100:.0f}</span>%</i></b><em>{'0 없고 ' if req0 else ''}평균 {acc:.1f} 이상 · 요구시간 전체</em></div>
    <div class="kpi hl hold"><span>보류</span><b><span id="k-hold">{B['보류']}</span><i>h · <span id="k-holdp">{B['보류'] / tot * 100:.0f}</span>%</i></b><em>평균 {hold:.1f}~{acc:.1f} · 확인 계획 대상</em></div>
-   <div class="kpi hl crit"><span>불인정</span><b><span id="k-rej">{B['불인정']}</span><i>h · <span id="k-rejp">{B['불인정'] / tot * 100:.0f}</span>%</i></b><em>0 이 있거나 평균 {hold:.1f} 미만 · 훈련 이수</em></div>
+   <div class="kpi hl crit"><span>불인정</span><b><span id="k-rej">{B['불인정']}</span><i>h · <span id="k-rejp">{B['불인정'] / tot * 100:.0f}</span>%</i></b><em>{'0 이 있거나 ' if req0 else ''}평균 {hold:.1f} 미만 · 훈련 이수</em></div>
  </div>
  <div class="stackwrap"><div class="stack">
   <div class="sg good" style="width:{B['인정'] / tot * 100:.3f}%" id="sg-good" title="인정"></div>
@@ -415,7 +416,7 @@ def render_panel(s: Session, assessment_id: int, *, readonly: bool = False) -> s
 
  <div class="tw"><table class="tp"><thead><tr><th>능력단위</th><th>내용 일치성</th><th>교육시간/요구시간</th><th>검증가능성</th><th>판정</th></tr></thead>
  <tbody>{urows}</tbody></table></div>
- <p class="sub" style="margin-top:6px">판정은 수행준거 점수로 정해집니다 — 0 이 하나라도 있으면 불인정, 전부 1 이상이면 평균 {acc:.1f} 이상 인정·{hold:.1f} 이상 보류. 아래에서 점수를 고치면 다시 계산됩니다.</p>
+ <p class="sub" style="margin-top:6px">판정은 수행준거 점수로 정해집니다 — {unit_rule_text(rb, short=True)}. 아래에서 점수를 고치면 다시 계산됩니다.</p>
 
  <details class="tbl"><summary>제출 문서 {len(docs)}건</summary>
  <div class="tw"><table><thead><tr><th>등급</th><th>문서</th><th>종류</th></tr></thead><tbody>{drows}</tbody></table></div></details>
@@ -433,7 +434,7 @@ def render_panel(s: Session, assessment_id: int, *, readonly: bool = False) -> s
 <div class="tabs" id="dv-tabs"></div><input id="dv-q" placeholder="낱말로 찾기 (모든 문서)"><div class="body" id="dv-b"></div></aside>
 <script>
 (function(){{
- var AID={assessment_id}, RO={1 if readonly else 0}, TOT={tot}, ACC={acc}, HOLD={hold}, UNITS={_js(units_json)}, ELS={_js(ev_json)};
+ var AID={assessment_id}, RO={1 if readonly else 0}, TOT={tot}, ACC={acc}, HOLD={hold}, REQ0={1 if req0 else 0}, UNITS={_js(units_json)}, ELS={_js(ev_json)};
  var $=function(i){{return document.getElementById(i)}};
  var FR={_js(fr_json)}, DN={_js(dn_json)};
  var dv=$('dv'), dvB=$('dv-b'), dvQ=$('dv-q'), dvTabs=$('dv-tabs'), curDoc=null;
@@ -471,13 +472,13 @@ def render_panel(s: Session, assessment_id: int, *, readonly: bool = False) -> s
  var byEid={{}}; ELS.forEach(function(x){{byEid[x.eid]=x; x.ov=x.ov||{{}};}});
  var byUnit={{}}; UNITS.forEach(function(u){{byUnit[u.code]=u}});
  function score(x, pc){{ return (pc.ref in x.ov) ? x.ov[pc.ref] : pc.ai; }}
- // coverage.unit_by_scores 와 같은 규칙: 0 이 있으면 불인정 · 전부 ≥1 이고 평균 ≥ACC 인정 · ≥HOLD 보류
+ // coverage.unit_by_scores 와 같은 규칙: (REQ0 이면 0 이 있을 때 불인정) · 평균 ≥ACC 인정 · ≥HOLD 보류
  function unitCalc(u){{
    if(u.fixed) return {{v:u.fixed, n:0, nz:0, mean:0}};
    var n=0, sum=0, zero=0;
    u.els.forEach(function(e){{ var x=byEid[e]; if(!x) return; x.pcs.forEach(function(pc){{ var s_=score(x,pc); n++; sum+=s_; if(s_===0) zero++; }}); }});
    var mean=n?sum/n:0, v;
-   if(!n||zero) v='불인정'; else if(mean>=ACC) v='인정'; else if(mean>=HOLD) v='보류'; else v='불인정';
+   if(!n||(REQ0&&zero)) v='불인정'; else if(mean>=ACC) v='인정'; else if(mean>=HOLD) v='보류'; else v='불인정';
    return {{v:v, n:n, nz:n-zero, mean:mean}};
  }}
  var VC={{'인정':['good','●'],'보류':['hold','◆'],'불인정':['crit','■']}};

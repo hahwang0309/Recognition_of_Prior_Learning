@@ -23,7 +23,7 @@ MARK_PREFIXES = (ADD, Q, S, PC)
 # 4차 TF: 판정 단위를 KSA 항목에서 수행준거로. 수행준거마다 0/1/2 점.
 #   존재 기준 — 직접 근거 1건↑ → 2 · 직접 없고 간접만 → 1 · 없음 → 0 · 부정 진술 → 0.
 #   위원이 "pc:<ref>=<n>" 표시로 덮어쓴다. 기이수(decided_by: rule) 요소는 전부 2.
-# 능력단위 — 0 인 수행준거가 있으면 불인정 · 전부 ≥1 이고 평균 ≥ accept_mean(1.5) 인정 ·
+# 능력단위 — (require_all_nonzero 면 0 인 수행준거가 있을 때 불인정) · 평균 ≥ accept_mean 인정 ·
 #   ≥ hold_mean(1.0) 보류 · 미만 불인정. 값은 rubric.track_b.pc_scoring / unit_rule.
 # 신형에서 fid 제외 표시(구형 「근거 부적합」)는 쓰지 않는다 — 점수를 고치면 된다.
 

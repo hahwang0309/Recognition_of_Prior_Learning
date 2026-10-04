@@ -15,7 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from krpl_core.config import get_rubric
-from services.report._shared import unit_count_text
+from services.report._shared import unit_count_text, unit_rule_text
 from services.report._shared import param_table, pending
 from services.report.track_a_report import CSS as BASE_CSS
 from services.review.plan import DEMO_LADDER, METHODS, latest_plan, exams_for, load_exams
@@ -232,8 +232,8 @@ def render_plan(s: Session, assessment_id: int) -> str:
     params = [
         ("수행준거 점수", "2 = 직접 근거 1건 이상 · 1 = 간접 근거만 · 0 = 근거 없음 또는 부정 진술. 위원이 고치면 위원 값이 우선",
          "4차 TF(2026-09-30) 합의 · 2026-10-02 존재 기준", True),
-        ("능력단위 판정", f"0 인 수행준거가 하나라도 있으면 불인정 · 전부 1 이상이고 평균 {acc:.1f} 이상이면 인정 · 평균 {hold_m:.1f} 이상이면 보류",
-         "4차 TF 직후 합의 — 출발값", pending(rb, "track_b.unit_rule.accept_mean")),
+        ("능력단위 판정", unit_rule_text(rb),
+         "2026-10-04 조정 — 5차에서 확정", pending(rb, "track_b.unit_rule.accept_mean")),
         ("확인 대상", "보류 단위 가운데 점수가 2 가 아닌 수행준거만 봅니다. 제출할 때 포함할 보류 단위를 고를 수 있습니다",
          "2026-10-02 설계 · 4차 TF 의견 14", True),
         ("인정되면 몇 시간", "그 능력단위의 요구시간 전체. 수행준거에는 시간이 매겨져 있지 않습니다",

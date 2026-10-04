@@ -129,6 +129,21 @@ def render_dashboard(rows: list[dict], queue: dict, worker_ok: bool,
  <small>{len(items)}건</small></h2>
  <table><tbody>{body}</tbody></table></div>"""
 
+    # 비고가 「★」로 시작하는 건 — 「오늘 볼 순서」로 맨 위에 한 줄씩(비고 순). 단계별 묶음 안에서는 순서가 흩어지기 때문.
+    starred = sorted((r for r in rows if (r.get("note") or "").startswith("★")), key=lambda r: r["note"])
+    today = ""
+    if starred:
+        lis = ""
+        for r in starred:
+            nxt = r.get("next_step")
+            href = nxt[1] if nxt and nxt[1] != "analyze" else f'/submissions/{r["id"]}'
+            lis += (f'<tr><td><span class="star">{e(r["note"])}</span></td>'
+                    f'<td><a href="/submissions/{r["id"]}"><b>{e(r["case_number"])}</b></a>{track_chip(r.get("track"))}</td>'
+                    f'<td>{e(r["official_name"] or r["target_program_id"])}</td>'
+                    f'<td class="act"><span><a class="st ac" href="{e(href)}">{e(nxt[0]) if nxt and nxt[1] != "analyze" else "개요 열기"}</a></span></td></tr>')
+        today = (f'<div class="grp" id="today"><h2><span class="st ac">오늘 볼 순서</span> <small>{len(starred)}건</small></h2>'
+                 f'<table><tbody>{lis}</tbody></table></div>')
+
     if not rows:
         secs = ('<div class="empty">접수된 건이 없습니다. '
                 '<a href="/submissions/new">새 접수</a>로 시작하세요.</div>')
@@ -139,7 +154,7 @@ def render_dashboard(rows: list[dict], queue: dict, worker_ok: bool,
 <div style="margin-bottom:16px"><a href="/submissions/new"
  style="display:inline-block;font-weight:600;padding:8px 18px;border-radius:8px;
  background:var(--tp);color:var(--s1)">＋ 새 접수 시작</a></div>
-{warn}{kpis}{secs}
+{warn}{kpis}{today}{secs}
 <footer>갱신 {datetime.now():%H:%M:%S} ·
  <span id="poll">도는 건이 있으면 3초마다 그 줄만 갱신합니다</span> ·
  <a href="/audit">감사</a> · <a href="/stats">운영 통계</a></footer>"""

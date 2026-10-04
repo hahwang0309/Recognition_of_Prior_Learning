@@ -191,6 +191,18 @@ def unit_count_text(u: dict) -> str:
         return f"수행준거 {u.get('n_covered', 0)}/{u.get('n_total', 0)} ≥1 · 평균 {u['mean']:.2f}"
     return f"요소 {u.get('n_covered', 0)}/{u.get('n_total', 0)} 인정"
 
+def unit_rule_text(rb, short: bool = False) -> str:
+    """능력단위 판정 규칙을 rubric(track_b.unit_rule) 값 그대로 한 문장으로. 화면 문구는 전부 이것을 쓴다."""
+    ur = (getattr(rb, "track_b", None) or {}).get("unit_rule") or {}
+    acc, hold = float(ur.get("accept_mean", 1.5)), float(ur.get("hold_mean", 1.0))
+    zero = bool(ur.get("require_all_nonzero", True))
+    if short:
+        return (f"0 이 하나라도 있으면 불인정, 전부 1 이상이면 평균 {acc:.1f} 이상 인정·{hold:.1f} 이상 보류" if zero
+                else f"수행준거 점수 평균 {acc:.1f} 이상 인정·{hold:.1f} 이상 보류·미만 불인정")
+    return (f"0 인 수행준거가 하나라도 있으면 불인정 · 전부 1 이상이고 평균 {acc:.1f} 이상이면 인정 · 평균 {hold:.1f} 이상이면 보류" if zero
+            else f"수행준거 점수(0·1·2)의 평균이 {acc:.1f} 이상이면 인정 · {hold:.1f} 이상이면 보류 · 미만이면 불인정 (0 인 수행준거가 있어도 평균으로 본다)")
+
+
 
 # 근거를 보이는 순서 — 공신력 높은 자료가 위로 (4차 TF 의견 9, 2026-10-02).
 # 등급(A→E)이 먼저, 같은 등급 안에서는 이 순서, 그 다음 적합도(직접→간접→부정).
