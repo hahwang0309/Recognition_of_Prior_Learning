@@ -16,6 +16,7 @@ dependencies = [
     "anthropic>=0.40",
     "olefile>=0.47",
     "pypdf>=5.1",
+    "python-docx>=1.1",            # docx 서류 읽기 (krpl_parsers)
     "python-multipart>=0.0.12",
     "structlog>=24.4",
 ]
