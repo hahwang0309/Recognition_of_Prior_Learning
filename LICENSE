@@ -1,26 +1,43 @@
-MIT License
+K-RPL 이용 허락 조건 (비상업적 이용 허락)
+Copyright (c) 2026 한국직업능력연구원(KRIVET) · 황하. 공동 저작권.
 
-Copyright (c) 2026 Korea Research Institute for Vocational Education and Training (KRIVET)
+이 소프트웨어는 한국산업인력공단이 발주하고 한국직업능력연구원이 수행한
+「일학습병행 RPL 활성화 방안 연구」의 용역 결과물이다.
 
-Developed as part of the research project "Activating Recognition of Prior Learning
-in the Work-Study Dual System (일학습병행 RPL 활성화 방안 연구)", commissioned by
-the Human Resources Development Service of Korea (한국산업인력공단) and conducted
-by KRIVET (한국직업능력연구원).
+1. 비상업적 이용
+   누구든지 비상업적 목적(연구·교육·공공기관의 업무 검토 등)으로 이 소프트웨어를
+   사용·복제·수정·배포할 수 있다. 이때 위 저작권 표시와 이 이용 허락 조건을
+   함께 포함해야 한다.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+2. 상업적 이용
+   상업적 목적의 이용(유료 서비스·제품에의 탑재, 영리 목적의 배포·판매 등)은
+   한국직업능력연구원과 사전에 협의하여 서면 동의를 받은 경우에만 할 수 있다.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+3. 독점적 이용 허락 금지
+   이 소프트웨어에 대해 특정인에게 독점적 이용 권한을 부여하지 않는다.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+4. 보증의 부인
+   이 소프트웨어는 「있는 그대로」 제공되며, 상품성·특정 목적 적합성·권리 비침해를
+   포함한 어떠한 보증도 하지 않는다. 저작권자는 이 소프트웨어의 사용으로 생긴
+   어떠한 손해에 대해서도 책임지지 않는다. 이 소프트웨어의 판정 결과는 심사 보조
+   자료이며, 최종 판정은 심사위원이 한다.
+
+문의: 한국직업능력연구원
+
+---------------------------------------------------------------------------
+K-RPL License (Non-Commercial)
+Copyright (c) 2026 Korea Research Institute for Vocational Education and
+Training (KRIVET) and Ha Hwang. Jointly held copyright.
+
+Developed under the research contract "일학습병행 RPL 활성화 방안 연구",
+commissioned by the Human Resources Development Service of Korea (HRDK) and
+conducted by KRIVET.
+
+1. Non-commercial use, copying, modification and distribution are permitted,
+   provided this copyright notice and these terms are included.
+2. Commercial use requires prior written agreement with KRIVET.
+3. No exclusive license is granted to any party.
+4. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. In no event
+   shall the copyright holders be liable for any claim or damages arising from
+   its use. Results are decision-support material; final decisions are made by
+   human assessors.
