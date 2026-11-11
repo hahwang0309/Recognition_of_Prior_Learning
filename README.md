@@ -196,6 +196,7 @@ cp .env.example .env                                             # 설정 파일
 | `KRPL_DATABASE_URL` | PostgreSQL 접속 문자열 |
 | `ANTHROPIC_API_KEY` | Claude API 키. 비우면 실제 호출을 하지 않는다 |
 | `KRPL_LLM_BACKEND` | `anthropic`(실제 호출) · `replay`(저장 응답 재생, 비용 0). 비우면 키 유무로 정한다 |
+| `KRPL_CATALOG_DIR` | NCS 카탈로그 파일(krpl.sqlite·ncs_ksa.sqlite) 폴더. 지정하면 `seed` 의 `--src` 를 생략할 수 있다 |
 
 `.env` 는 저장소에 올라가지 않는다. 적용 순서는 `config/settings.yaml` < `config/environments/{환경}.yaml` < `.env` < 실행 시 환경변수다.
 

@@ -226,7 +226,7 @@ def test_unit_by_scores_mean_only_rule(rb):
 
 
 def test_rubric_unit_rule_values(rb):
-    """rubric 의 현재 출발값(2026-10-04): 0 조건 없음 · 평균 1.3 인정 · 1.0 보류. 바꾸면 문서(README·CLAUDE.md §3)도 함께."""
+    """rubric 의 현재 출발값(2026-10-04): 0 조건 없음 · 평균 1.3 인정 · 1.0 보류. 바꾸면 문서(README §3 판정 기준, docs/개발문서.md)도 함께."""
     ur = rb.track_b["unit_rule"]
     assert (ur["require_all_nonzero"], ur["accept_mean"], ur["hold_mean"]) == (False, 1.3, 1.0)
 

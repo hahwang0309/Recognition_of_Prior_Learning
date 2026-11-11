@@ -19,7 +19,7 @@ from krpl_core.db import session_scope
 from krpl_core.models import Submission
 from services.ingest.service import ingest_submission
 
-SRC = Path("/Users/hahwang/Dropbox/2026_일학습병행훈련/Data(20260812)/derived/trackB/submission")
+SRC = Path(__file__).resolve().parents[2] / "Data(20260812)" / "derived" / "trackB" / "submission"   # 연구 폴더의 시연 자료
 CASE = {"B001": "R2026-0001", "B002": "R2026-0002", "B003": "R2026-0003", "B004": "R2026-0004"}
 
 APPLICANT = re.compile(r"^@@APPLICANT\s+(\S+)\s*\|\s*([^|]+?)\s*\|")

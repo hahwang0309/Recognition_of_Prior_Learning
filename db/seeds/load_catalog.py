@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sqlite3
 import sys
 import time
@@ -17,9 +18,8 @@ from sqlalchemy import text
 from krpl_core.config import get_rubric
 from krpl_core.db import get_engine
 
-DEFAULT_SRC = Path(
-    "/Users/hahwang/Dropbox/2026_일학습병행훈련/Data(20260812)/derived"
-)
+DEFAULT_SRC = Path(os.environ.get("KRPL_CATALOG_DIR")
+                   or Path(__file__).resolve().parents[3] / "Data(20260812)" / "derived")   # 환경변수 또는 연구 폴더 기본 위치
 
 # (대상 테이블, 원본 SQLite, 원본 쿼리, 컬럼)
 SPECS = [

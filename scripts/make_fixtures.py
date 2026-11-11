@@ -16,7 +16,7 @@ from sqlalchemy import text
 from krpl_core.db import session_scope
 from services.assess.package import build_package
 
-SRC = Path("/Users/hahwang/Dropbox/2026_일학습병행훈련/Data(20260812)/derived/trackB")
+SRC = Path(__file__).resolve().parents[2] / "Data(20260812)" / "derived" / "trackB"   # 연구 폴더의 시연 자료
 DST = Path(__file__).resolve().parents[1] / "tests/fixtures/trackb"
 CASES = {"R2026-0001": "B001", "R2026-0002": "B002", "R2026-0003": "B003", "R2026-0004": "B004"}
 FID = re.compile(r"\bD\d{2}-[A-Z]\d{2}\b")
