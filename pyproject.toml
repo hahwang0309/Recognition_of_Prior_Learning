@@ -3,6 +3,7 @@ name = "krpl"
 version = "0.1.0"
 description = "일학습병행 선행학습인정(RPL) 심사 지원 시스템"
 requires-python = ">=3.12"
+license = { text = "MIT" }
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
