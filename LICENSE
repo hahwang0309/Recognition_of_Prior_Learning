@@ -1,45 +1,75 @@
-K-RPL 이용 허락 조건 (비상업적 이용 허락)
-Copyright (c) 2026 한국산업인력공단 · 한국직업능력연구원. 공동 저작권.
-개발: 황하
+Required Notice: Copyright (c) 2026 한국산업인력공단(HRDK) · 한국직업능력연구원(KRIVET). 공동 저작권(Jointly held copyright). 개발: 황하(Ha Hwang)
 
-이 소프트웨어는 한국산업인력공단이 발주하고 한국직업능력연구원이 수행한
-「일학습병행 RPL 활성화 방안 연구」의 용역 결과물이다.
+# PolyForm Noncommercial License 1.0.0
 
-1. 비상업적 이용
-   누구든지 비상업적 목적(연구·교육·공공기관의 업무 검토 등)으로 이 소프트웨어를
-   사용·복제·수정·배포할 수 있다. 이때 위 저작권 표시와 이 이용 허락 조건을
-   함께 포함해야 한다.
+<https://polyformproject.org/licenses/noncommercial/1.0.0>
 
-2. 상업적 이용
-   상업적 목적의 이용(유료 서비스·제품에의 탑재, 영리 목적의 배포·판매 등)은
-   한국직업능력연구원과 사전에 협의하여 서면 동의를 받은 경우에만 할 수 있다.
+## Acceptance
 
-3. 독점적 이용 허락 금지
-   이 소프트웨어에 대해 특정인에게 독점적 이용 권한을 부여하지 않는다.
+In order to get any license under these terms, you must agree to them as both strict obligations and conditions to all your licenses.
 
-4. 보증의 부인
-   이 소프트웨어는 「있는 그대로」 제공되며, 상품성·특정 목적 적합성·권리 비침해를
-   포함한 어떠한 보증도 하지 않는다. 저작권자는 이 소프트웨어의 사용으로 생긴
-   어떠한 손해에 대해서도 책임지지 않는다. 이 소프트웨어의 판정 결과는 심사 보조
-   자료이며, 최종 판정은 심사위원이 한다.
+## Copyright License
 
-문의: 한국직업능력연구원
+The licensor grants you a copyright license for the software to do everything you might do with the software that would otherwise infringe the licensor's copyright in it for any permitted purpose.  However, you may only distribute the software according to [Distribution License](#distribution-license) and make changes or new works based on the software according to [Changes and New Works License](#changes-and-new-works-license).
 
----------------------------------------------------------------------------
-K-RPL License (Non-Commercial)
-Copyright (c) 2026 Human Resources Development Service of Korea (HRDK) and
-Korea Research Institute for Vocational Education and Training (KRIVET).
-Jointly held copyright. Developed by Ha Hwang.
+## Distribution License
 
-Developed under the research contract "일학습병행 RPL 활성화 방안 연구",
-commissioned by the Human Resources Development Service of Korea (HRDK) and
-conducted by KRIVET.
+The licensor grants you an additional copyright license to distribute copies of the software.  Your license to distribute covers distributing the software with changes and new works permitted by [Changes and New Works License](#changes-and-new-works-license).
 
-1. Non-commercial use, copying, modification and distribution are permitted,
-   provided this copyright notice and these terms are included.
-2. Commercial use requires prior written agreement with KRIVET.
-3. No exclusive license is granted to any party.
-4. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. In no event
-   shall the copyright holders be liable for any claim or damages arising from
-   its use. Results are decision-support material; final decisions are made by
-   human assessors.
+## Notices
+
+You must ensure that anyone who gets a copy of any part of the software from you also gets a copy of these terms or the URL for them above, as well as copies of any plain-text lines beginning with `Required Notice:` that the licensor provided with the software.  For example:
+
+> Required Notice: Copyright Yoyodyne, Inc. (http://example.com)
+
+## Changes and New Works License
+
+The licensor grants you an additional copyright license to make changes and new works based on the software for any permitted purpose.
+
+## Patent License
+
+The licensor grants you a patent license for the software that covers patent claims the licensor can license, or becomes able to license, that you would infringe by using the software.
+
+## Noncommercial Purposes
+
+Any noncommercial purpose is a permitted purpose.
+
+## Personal Uses
+
+Personal use for research, experiment, and testing for the benefit of public knowledge, personal study, private entertainment, hobby projects, amateur pursuits, or religious observance, without any anticipated commercial application, is use for a permitted purpose.
+
+## Noncommercial Organizations
+
+Use by any charitable organization, educational institution, public research organization, public safety or health organization, environmental protection organization, or government institution is use for a permitted purpose regardless of the source of funding or obligations resulting from the funding.
+
+## Fair Use
+
+You may have "fair use" rights for the software under the law. These terms do not limit them.
+
+## No Other Rights
+
+These terms do not allow you to sublicense or transfer any of your licenses to anyone else, or prevent the licensor from granting licenses to anyone else.  These terms do not imply any other licenses.
+
+## Patent Defense
+
+If you make any written claim that the software infringes or contributes to infringement of any patent, your patent license for the software granted under these terms ends immediately. If your company makes such a claim, your patent license ends immediately for work on behalf of your company.
+
+## Violations
+
+The first time you are notified in writing that you have violated any of these terms, or done anything with the software not covered by your licenses, your licenses can nonetheless continue if you come into full compliance with these terms, and take practical steps to correct past violations, within 32 days of receiving notice.  Otherwise, all your licenses end immediately.
+
+## No Liability
+
+***As far as the law allows, the software comes as is, without any warranty or condition, and the licensor will not be liable to you for any damages arising out of these terms or the use or nature of the software, under any kind of legal claim.***
+
+## Definitions
+
+The **licensor** is the individual or entity offering these terms, and the **software** is the software the licensor makes available under these terms.
+
+**You** refers to the individual or entity agreeing to these terms.
+
+**Your company** is any legal entity, sole proprietorship, or other kind of organization that you work for, plus all organizations that have control over, are under the control of, or are under common control with that organization.  **Control** means ownership of substantially all the assets of an entity, or the power to direct its management and policies by vote, contract, or otherwise.  Control can be direct or indirect.
+
+**Your licenses** are all the licenses granted to you for the software under these terms.
+
+**Use** means anything you do with the software requiring one of your licenses.
